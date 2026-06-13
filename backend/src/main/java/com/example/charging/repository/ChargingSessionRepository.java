@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface ChargingSessionRepository extends JpaRepository<ChargingSession, Long> {
@@ -17,4 +18,6 @@ public interface ChargingSessionRepository extends JpaRepository<ChargingSession
     List<ChargingSession> findByPileIdAndStatus(Long pileId, ChargingSessionStatus status);
 
     List<ChargingSession> findByRequestId(Long requestId);
+
+    Optional<ChargingSession> findFirstByRequestIdAndStatus(Long requestId, ChargingSessionStatus status);
 }

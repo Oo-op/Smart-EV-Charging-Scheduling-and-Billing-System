@@ -460,8 +460,49 @@ USER / ADMIN
 
 ```text
 1. 将 pile.status 改为 FAULT。
-2. 如果该桩正在充电，可先返回错误或标记 session INTERRUPTED。
-3. 故障恢复可作为后续增强。
+2. 如果该桩正在充电，标记 session.status = INTERRUPTED。
+3. 记录已充电量，计算 remainingAmount = targetAmount - chargedAmount。
+4. 如果 remainingAmount > 0，将 request.status 改回 WAITING，并优先参与故障恢复调度。
+5. 当前项目尚无 fault_report / maintenance_record 表，faultReason 与硬件电表读数为临时模拟接口字段。
+```
+
+---
+
+## 5.3 故障恢复
+
+| 项目   | 内容                                 |
+| ---- | ---------------------------------- |
+| 接口   | `POST /api/piles/{pileId}/recover` |
+| 负责人  | C                                  |
+| 功能   | 将故障充电桩恢复为空闲，并触发同类型等待队列调度      |
+| 路径参数 | `pileId`                           |
+| 请求体  | 空                                  |
+| 返回   | 恢复结果及可选调度结果                       |
+
+响应示例：
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "pileId": 1,
+    "status": "IDLE",
+    "dispatchResult": {
+      "algorithm": "SJF",
+      "requestId": 1001,
+      "pileId": 1,
+      "pileCode": "F01",
+      "mode": "FAST",
+      "remainingAmount": 12.0,
+      "estimatedDurationMinutes": 12,
+      "requestStatus": "ASSIGNED",
+      "pileStatus": "RESERVED"
+    },
+    "temporarySimulation": true,
+    "temporarySimulationNote": "当前项目尚无 fault_report/maintenance_record 表；故障原因、恢复记录与硬件电表读数为接口层临时模拟信息。"
+  }
+}
 ```
 
 ---
@@ -504,7 +545,29 @@ USER / ADMIN
 }
 ```
 
-第一版调度规则：
+调度规则：
+
+```text
+1. 根据 mode 查找同类型 WAITING 请求。
+2. 优先选择故障恢复请求。
+3. 使用 SJF：预计充电时长 = (targetAmount - chargedAmount) / pile.power。
+4. 选择预计充电时长最短的请求。
+5. 若预计时长相同，选择 createdAt 更早的请求，避免长期等待。
+6. 查找同 mode 且 status=IDLE 的充电桩。
+7. 更新 request.status = ASSIGNED。
+8. 更新 request.assignedPileId = pileId。
+9. 更新 pile.status = RESERVED。
+```
+
+临时实现说明：
+
+```text
+当前项目没有 wait_queue / queue_item / priority 字段。
+故障恢复优先级临时复用 charging_request.queueNumber = 0 表示。
+正式队列表完成后，应替换为独立优先级字段或队列表记录。
+```
+
+历史第一版 FCFS 规则：
 
 ```text
 1. 根据 mode 查找同类型 WAITING 请求。
@@ -985,7 +1048,7 @@ totalFee = electricityFee + serviceFee
 4. Controller 不写业务逻辑，只调用 Service。
 5. Service 负责状态流转和业务规则。
 6. Repository / Mapper 只负责数据库读写。
-7. 第一版调度使用 FCFS。
+7. 当前 C 模块调度使用 SJF，并保留 createdAt 作为同预计时长时的公平性兜底。
 8. 第一版计费使用简单计费。
-9. 后续再升级 SJF 调度和分时计费。
+9. 后续再升级正式队列表、故障记录表和分时计费账单明细。
 ```
