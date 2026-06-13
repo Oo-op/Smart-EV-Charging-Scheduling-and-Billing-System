@@ -11,9 +11,16 @@ export default {
 </script>
 
 <style>
-#app {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  min-height: 100vh;
+body {
   margin: 0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+#app {
+  font-family: 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', sans-serif;
+  min-height: 100vh;
 }
 </style>

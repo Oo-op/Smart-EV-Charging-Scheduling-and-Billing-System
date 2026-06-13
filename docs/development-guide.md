@@ -8,6 +8,46 @@
 
 ---
 
+## 0. 当前阶段说明
+
+这个仓库现在是“第一阶段基础骨架”：
+
+- 目标：先把前后端项目结构、统一响应、基础数据模型和少量核心接口跑通
+- 现状：已经能本地启动并验证健康检查、初始化演示数据、充电站查询、枚举查询、计费查询
+- 未完成：用户、车辆、充电请求、调度、会话、账单支付主流程仍需继续补
+
+### 0.1 本地启动方式
+
+后端默认使用 H2 内存数据库，不依赖本地 MySQL：
+
+```bash
+cd backend
+mvn spring-boot:run
+```
+
+前端：
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+如果要接本地 MySQL，使用 `mysql` profile：
+
+```bash
+cd backend
+mvn spring-boot:run -Dspring-boot.run.profiles=mysql
+```
+
+说明：
+
+- `application.yml` 是默认本地开发配置，优先保证“开箱可跑”
+- `application-mysql.yml` 保留 MySQL 接入配置
+- `schema.sql` 当前作为 MySQL 结构参考，不再作为默认启动脚本执行
+
+---
+
 ## 1. 项目已有什么
 
 ### 1.1 目录结构
@@ -28,8 +68,9 @@ smart-charging-system/
 │       ├── config/                 # CorsConfig / GlobalResponseHandler / GlobalExceptionHandler
 │       └── ChargingApplication.java
 ├── backend/src/main/resources/
-│   ├── application.yml             # Spring Boot 配置（端口 8080、context-path=/api、MySQL）
-│   └── schema.sql                  # 建表 DDL + 默认电价 INSERT
+│   ├── application.yml             # 默认本地开发配置（H2 内存库）
+│   ├── application-mysql.yml       # 可选 MySQL profile
+│   └── schema.sql                  # MySQL 结构参考 SQL
 ├── frontend/
 │   ├── package.json                # Vue 3 + Vue Router + Axios + Vite
 │   ├── vite.config.js              # dev 端口 5173，/api 代理到 http://localhost:8080

@@ -11,10 +11,10 @@ DROP TABLE IF EXISTS charging_session;
 DROP TABLE IF EXISTS charging_request;
 DROP TABLE IF EXISTS charging_pile;
 DROP TABLE IF EXISTS vehicle;
-DROP TABLE IF EXISTS user;
+DROP TABLE IF EXISTS app_user;
 DROP TABLE IF EXISTS charging_station;
 
-CREATE TABLE user (
+CREATE TABLE app_user (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     username VARCHAR(50) NOT NULL UNIQUE,
     password VARCHAR(100) NOT NULL,
