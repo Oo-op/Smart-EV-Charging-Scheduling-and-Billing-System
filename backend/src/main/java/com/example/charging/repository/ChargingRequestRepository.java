@@ -1,4 +1,5 @@
 package com.example.charging.repository;
+import java.util.Optional;
 
 import com.example.charging.entity.ChargingRequest;
 import com.example.charging.enums.ChargeMode;
@@ -21,4 +22,10 @@ public interface ChargingRequestRepository extends JpaRepository<ChargingRequest
     List<ChargingRequest> findByModeAndStatusInOrderByCreatedAtAsc(ChargeMode mode, List<ChargingRequestStatus> statuses);
 
     List<ChargingRequest> findByStatus(ChargingRequestStatus status);
+
+    // 在 ChargingRequestRepository 接口中添加以下方法
+
+    Optional<ChargingRequest> findByIdAndUserId(Long id, Long userId);
+
+    List<ChargingRequest> findByUserIdOrderByCreatedAtDesc(Long userId);
 }

@@ -25,6 +25,6 @@ public class SessionController {
     @PostMapping("/{sessionId}/stop")
     public StopSessionResult stop(@PathVariable Long sessionId,
                                   @RequestBody(required = false) StopSessionRequest request) {
-        return sessionService.stop(sessionId, request == null ? null : request.getChargedAmount());
+        return sessionService.stop(sessionId, request);
     }
 }

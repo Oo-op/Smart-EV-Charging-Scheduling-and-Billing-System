@@ -37,6 +37,9 @@ public class Bill {
     @Column(name = "total_fee", precision = 10, scale = 2)
     private BigDecimal totalFee = BigDecimal.ZERO;
 
+    @Column(name = "breakdown", length = 512)
+    private String breakdown;
+
     /** UNPAID / PAID / CANCELLED（见 BillStatus） */
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)

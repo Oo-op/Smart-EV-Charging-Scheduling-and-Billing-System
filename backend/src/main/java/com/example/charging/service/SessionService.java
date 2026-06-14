@@ -2,6 +2,7 @@ package com.example.charging.service;
 
 import com.example.charging.dto.BillSummaryDTO;
 import com.example.charging.dto.SessionDTO;
+import com.example.charging.dto.StopSessionRequest;
 import com.example.charging.dto.StopSessionResult;
 import com.example.charging.entity.Bill;
 import com.example.charging.entity.ChargingPile;
@@ -11,7 +12,6 @@ import com.example.charging.enums.BillStatus;
 import com.example.charging.enums.ChargingPileStatus;
 import com.example.charging.enums.ChargingRequestStatus;
 import com.example.charging.enums.ChargingSessionStatus;
-import com.example.charging.repository.BillRepository;
 import com.example.charging.repository.ChargingPileRepository;
 import com.example.charging.repository.ChargingRequestRepository;
 import com.example.charging.repository.ChargingSessionRepository;
@@ -25,21 +25,19 @@ import java.time.LocalDateTime;
 @Service
 public class SessionService {
 
-    private static final BigDecimal DEFAULT_ELECTRICITY_FEE = new BigDecimal("0.80");
-
     private final ChargingRequestRepository requestRepository;
     private final ChargingPileRepository pileRepository;
     private final ChargingSessionRepository sessionRepository;
-    private final BillRepository billRepository;
+    private final BillService billService;
 
     public SessionService(ChargingRequestRepository requestRepository,
                           ChargingPileRepository pileRepository,
                           ChargingSessionRepository sessionRepository,
-                          BillRepository billRepository) {
+                          BillService billService) {
         this.requestRepository = requestRepository;
         this.pileRepository = pileRepository;
         this.sessionRepository = sessionRepository;
-        this.billRepository = billRepository;
+        this.billService = billService;
     }
 
     @Transactional
@@ -82,8 +80,15 @@ public class SessionService {
         return toSessionDto(saved, request, pile);
     }
 
+    /**
+     * 结束充电会话并生成账单。
+     * 支持通过 StopSessionRequest 传递时间模拟参数进行测试：
+     * - mockStartTime: 如果非空，将直接覆盖会话的开始时间。
+     * - mockChargingHours: 如果非空，将根据结束时间（当前时间）往前推指定的小时数，并设置为会话开始时间。
+     * 注：此模拟逻辑可用于在简短的本地测试中，生成跨越不同峰、平、谷电价时段的演示账单。
+     */
     @Transactional
-    public StopSessionResult stop(Long sessionId, BigDecimal chargedAmount) {
+    public StopSessionResult stop(Long sessionId, StopSessionRequest req) {
         ChargingSession session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new IllegalArgumentException("充电会话不存在"));
         if (session.getStatus() != ChargingSessionStatus.CHARGING) {
@@ -95,9 +100,20 @@ public class SessionService {
         ChargingPile pile = pileRepository.findById(session.getPileId())
                 .orElseThrow(() -> new IllegalArgumentException("充电桩不存在"));
 
-        BigDecimal actualAmount = chargedAmount == null ? session.getTargetAmount() : chargedAmount;
+        BigDecimal actualAmount = (req == null || req.getChargedAmount() == null) ? session.getTargetAmount() : req.getChargedAmount();
         actualAmount = safe(actualAmount).setScale(2, RoundingMode.HALF_UP);
         LocalDateTime now = LocalDateTime.now();
+
+        // 模拟时间逻辑处理
+        if (req != null) {
+            if (req.getMockStartTime() != null) {
+                // 情形一：手动指定充电开始时间
+                session.setStartTime(req.getMockStartTime());
+            } else if (req.getMockChargingHours() != null) {
+                // 情形二：自动将充电开始时间往前推指定的整数小时
+                session.setStartTime(now.minusHours(req.getMockChargingHours()));
+            }
+        }
 
         session.setChargedAmount(actualAmount);
         session.setEndTime(now);
@@ -109,24 +125,10 @@ public class SessionService {
         ChargingSession savedSession = sessionRepository.save(session);
         requestRepository.save(request);
         pileRepository.save(pile);
-        Bill bill = billRepository.save(createBill(savedSession, pile, actualAmount));
+
+        // 调用 BillService 分时计费生成账单
+        Bill bill = billService.generateBill(savedSession);
         return toStopResult(savedSession, bill);
-    }
-
-    private Bill createBill(ChargingSession session, ChargingPile pile, BigDecimal chargedAmount) {
-        BigDecimal electricityFee = chargedAmount.multiply(DEFAULT_ELECTRICITY_FEE)
-                .setScale(2, RoundingMode.HALF_UP);
-        BigDecimal serviceFee = chargedAmount.multiply(safe(pile.getServiceFee()))
-                .setScale(2, RoundingMode.HALF_UP);
-
-        Bill bill = new Bill();
-        bill.setUserId(session.getUserId());
-        bill.setSessionId(session.getId());
-        bill.setElectricityFee(electricityFee);
-        bill.setServiceFee(serviceFee);
-        bill.setTotalFee(electricityFee.add(serviceFee));
-        bill.setStatus(BillStatus.UNPAID);
-        return bill;
     }
 
     private SessionDTO toSessionDto(ChargingSession session, ChargingRequest request, ChargingPile pile) {
