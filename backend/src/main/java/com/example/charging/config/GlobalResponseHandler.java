@@ -1,4 +1,4 @@
-package com.example.charging.common;
+package com.example.charging.config;
 
 import com.example.charging.common.ApiResponse;
 import com.example.charging.common.IgnoreResponseWrap;
