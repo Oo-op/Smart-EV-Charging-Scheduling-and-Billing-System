@@ -22,7 +22,15 @@ request.interceptors.response.use(
     }
     return res;
   },
-  (error) => Promise.reject(error)
+  (error) => {
+    const msg =
+      error.response?.data?.message ||
+      (error.response?.status === 404
+        ? `接口不存在 (${error.config?.method?.toUpperCase()} ${error.config?.url})，请确认后端已重启`
+        : null) ||
+      error.message;
+    return Promise.reject(new Error(msg));
+  }
 );
 
 export default request;

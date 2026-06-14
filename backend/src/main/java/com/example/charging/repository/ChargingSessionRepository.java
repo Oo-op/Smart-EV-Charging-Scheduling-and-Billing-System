@@ -20,4 +20,6 @@ public interface ChargingSessionRepository extends JpaRepository<ChargingSession
     List<ChargingSession> findByRequestId(Long requestId);
 
     Optional<ChargingSession> findFirstByRequestIdAndStatus(Long requestId, ChargingSessionStatus status);
+
+    long countByStatus(ChargingSessionStatus status);
 }

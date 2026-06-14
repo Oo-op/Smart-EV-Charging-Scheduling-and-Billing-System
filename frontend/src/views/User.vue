@@ -1,0 +1,1507 @@
+<template>
+  <div class="user-portal">
+    <!-- 未登录：门户首页 -->
+    <template v-if="!session.userId">
+      <header class="hero">
+        <p class="eyebrow">Campus EV Charging</p>
+        <h1>校园智能充电服务</h1>
+        <p class="subtitle">
+          在线预约充电桩、实时查看排队进度、充电结束后一键支付。支持快充与慢充，分时电价透明可查。
+        </p>
+      </header>
+
+      <section class="highlights">
+        <article class="highlight-card">
+          <span class="highlight-icon">⚡</span>
+          <h3>快充 / 慢充</h3>
+          <p>60kW 快充与 7kW 慢充，按需求自由选择。</p>
+        </article>
+        <article class="highlight-card">
+          <span class="highlight-icon">📋</span>
+          <h3>智能排队</h3>
+          <p>系统自动分配最优桩位，减少等待时间。</p>
+        </article>
+        <article class="highlight-card">
+          <span class="highlight-icon">💳</span>
+          <h3>在线结算</h3>
+          <p>充电结束生成账单，支持微信模拟支付。</p>
+        </article>
+      </section>
+
+      <section class="panel auth-panel">
+        <div class="auth-tabs">
+          <button type="button" :class="{ active: authTab === 'login' }" @click="authTab = 'login'">登录</button>
+          <button type="button" :class="{ active: authTab === 'register' }" @click="authTab = 'register'">注册账号</button>
+        </div>
+
+        <form v-if="authTab === 'login'" class="auth-form" @submit.prevent="handleLogin">
+          <label>
+            <span>用户名</span>
+            <input v-model="loginForm.username" placeholder="请输入用户名" required />
+          </label>
+          <label>
+            <span>密码</span>
+            <input v-model="loginForm.password" type="password" placeholder="请输入密码" required />
+          </label>
+          <button type="submit" class="btn-primary" :disabled="loading.login">
+            {{ loading.login ? '登录中…' : '登录并开始使用' }}
+          </button>
+        </form>
+
+        <form v-else class="auth-form" @submit.prevent="handleRegister">
+          <label>
+            <span>用户名</span>
+            <input v-model="registerForm.username" placeholder="设置用户名" required />
+          </label>
+          <label>
+            <span>密码</span>
+            <input v-model="registerForm.password" type="password" placeholder="设置密码" required />
+          </label>
+          <label>
+            <span>手机号</span>
+            <input v-model="registerForm.phone" placeholder="用于接收充电通知" required />
+          </label>
+          <button type="submit" class="btn-primary" :disabled="loading.register">
+            {{ loading.register ? '注册中…' : '注册账号' }}
+          </button>
+        </form>
+      </section>
+    </template>
+
+    <!-- 已登录：用户中心 -->
+    <template v-else>
+      <header class="hero compact">
+        <div class="hero-row">
+          <div>
+            <p class="eyebrow">Welcome back</p>
+            <h1>您好，{{ session.username }}</h1>
+            <p class="subtitle">选择车辆与充电方式，完成预约后在指定桩位插枪即可开始充电。</p>
+          </div>
+          <button type="button" class="btn-outline" @click="logout">退出登录</button>
+        </div>
+      </header>
+
+      <nav class="page-tabs">
+        <button
+          v-for="tab in pageTabs"
+          :key="tab.id"
+          type="button"
+          :class="{ active: pageTab === tab.id }"
+          @click="pageTab = tab.id"
+        >
+          {{ tab.label }}
+          <span v-if="tab.id === 'bills' && unpaidCount" class="tab-badge">{{ unpaidCount }}</span>
+          <span v-if="tab.id === 'orders' && ongoingOrderCount" class="tab-badge">{{ ongoingOrderCount }}</span>
+        </button>
+      </nav>
+
+      <ol class="step-track">
+        <li v-for="(step, i) in flowSteps" :key="step.id" :class="{ done: step.done, current: step.current }">
+          <span class="step-num">{{ step.done ? '✓' : i + 1 }}</span>
+          <span class="step-text">{{ step.label }}</span>
+        </li>
+      </ol>
+
+      <p v-if="message" class="banner" :class="messageType">{{ message }}</p>
+
+      <!-- 预约充电 -->
+      <div v-show="pageTab === 'charge'" class="layout-main">
+        <div class="layout-primary">
+          <!-- 进行中的订单 -->
+          <article v-if="activeRequest && !isTerminalRequest" class="panel order-panel">
+            <div class="panel-head">
+              <h2>当前充电订单</h2>
+              <span class="order-id">订单号 {{ activeRequest.requestId }}</span>
+            </div>
+            <div class="order-status">
+              <span class="status-pill" :class="statusPillClass">{{ orderStatusText }}</span>
+              <span v-if="dispatchResult?.pileCode" class="pile-tag">桩位 {{ dispatchResult.pileCode }}</span>
+            </div>
+            <div class="order-progress">
+              <div class="progress-bar">
+                <div class="progress-fill" :style="{ width: `${chargePercent}%` }" />
+              </div>
+              <p class="progress-caption">
+                已充 <strong>{{ displayCharged }}</strong> / {{ displayTarget }} kWh
+              </p>
+            </div>
+            <dl class="order-details">
+              <div><dt>充电方式</dt><dd>{{ getStatusDesc('chargeMode', activeRequest.mode) }}</dd></div>
+              <div><dt>排队序号</dt><dd>{{ activeRequest.queueNumber ?? '—' }}</dd></div>
+              <div><dt>分配桩位</dt><dd>{{ activeRequest.assignedPileId ? `#${activeRequest.assignedPileId}` : '等待分配' }}</dd></div>
+            </dl>
+
+            <div class="order-actions">
+              <button
+                v-if="activeRequest.status === 'WAITING'"
+                type="button"
+                class="btn-secondary"
+                :disabled="loading.dispatch"
+                @click="handleDispatch"
+              >
+                {{ loading.dispatch ? '分配中…' : '分配充电桩' }}
+              </button>
+              <button
+                v-if="canStartSession"
+                type="button"
+                class="btn-primary"
+                :disabled="loading.start"
+                @click="handleStartSession"
+              >
+                {{ loading.start ? '启动中…' : '插枪并开始充电' }}
+              </button>
+              <template v-if="currentSession">
+                <label class="stop-field">
+                  <span>本次充电量 (kWh)</span>
+                  <input v-model.number="stopForm.chargedAmount" type="number" step="0.1" min="0" />
+                </label>
+                <button type="button" class="btn-primary" :disabled="loading.stop" @click="handleStopSession">
+                  {{ loading.stop ? '结算中…' : '结束充电并结算' }}
+                </button>
+              </template>
+              <button type="button" class="btn-text" :disabled="loading.refreshRequest" @click="refreshActiveRequest">
+                刷新订单状态
+              </button>
+              <button v-if="canCancel" type="button" class="btn-text danger" :disabled="loading.cancel" @click="handleCancelRequest">
+                取消订单
+              </button>
+              <button
+                v-if="activeRequest.status === 'WAITING'"
+                type="button"
+                class="btn-text"
+                :disabled="loading.modify"
+                @click="handleModifyRequest"
+              >
+                调整目标电量
+              </button>
+            </div>
+
+            <div v-if="dispatchResult && !currentSession" class="notice success">
+              已为您分配 <strong>{{ dispatchResult.pileCode }}</strong> 号桩，预计充电
+              {{ dispatchResult.estimatedDurationMinutes }} 分钟。请前往对应车位插枪。
+            </div>
+          </article>
+
+          <!-- 新建预约 -->
+          <article v-else class="panel">
+            <h2>预约充电</h2>
+            <p class="muted">请先选择车辆与充电方式，提交后进入排队队列。</p>
+
+            <div v-if="!vehicles.length" class="empty-block">
+              <p>您还没有绑定车辆</p>
+              <button type="button" class="btn-secondary" @click="pageTab = 'vehicles'">去绑定车辆</button>
+            </div>
+
+            <template v-else>
+              <p class="field-label">选择车辆</p>
+              <div class="vehicle-cards">
+                <button
+                  v-for="v in vehicles"
+                  :key="v.vehicleId"
+                  type="button"
+                  class="vehicle-card"
+                  :class="{ active: selectedVehicleId === v.vehicleId }"
+                  @click="selectedVehicleId = v.vehicleId"
+                >
+                  <span class="plate">{{ v.plateNumber }}</span>
+                  <span class="meta">{{ v.model }}</span>
+                </button>
+              </div>
+
+              <p class="field-label">充电方式</p>
+              <div class="mode-cards">
+                <button
+                  type="button"
+                  class="mode-card"
+                  :class="{ active: requestForm.mode === 'FAST' }"
+                  @click="switchMode('FAST')"
+                >
+                  <strong>快充</strong>
+                  <span>约 60 kW · 适合赶时间</span>
+                </button>
+                <button
+                  type="button"
+                  class="mode-card"
+                  :class="{ active: requestForm.mode === 'SLOW' }"
+                  @click="switchMode('SLOW')"
+                >
+                  <strong>慢充</strong>
+                  <span>约 7 kW · 更经济温和</span>
+                </button>
+              </div>
+
+              <label class="field-block">
+                <span class="field-label">目标充电量 (kWh)</span>
+                <input v-model.number="requestForm.targetAmount" type="number" step="1" min="5" />
+              </label>
+
+              <button
+                type="button"
+                class="btn-primary wide"
+                :disabled="loading.request || !selectedVehicleId"
+                @click="handleSubmitRequest"
+              >
+                {{ loading.request ? '提交中…' : '立即预约充电' }}
+              </button>
+            </template>
+          </article>
+        </div>
+
+        <aside class="layout-side">
+          <article class="panel">
+            <div class="panel-head">
+              <h2>排队情况</h2>
+              <button type="button" class="btn-text" :disabled="loading.queue" @click="loadQueue">刷新</button>
+            </div>
+            <p class="queue-summary">
+              {{ getStatusDesc('chargeMode', requestForm.mode) }} ·
+              前方 <strong>{{ queueInfo.queueLength ?? 0 }}</strong> 辆 ·
+              空闲桩 <strong>{{ queueInfo.availablePileCount ?? 0 }}</strong> 台
+            </p>
+            <QueueList :items="queueInfo.waitingList || []" />
+          </article>
+
+          <article class="panel tips-panel">
+            <h2>温馨提示</h2>
+            <ul class="tips-list">
+              <li>预约成功后请等待系统分配桩位，收到桩号后再前往车位。</li>
+              <li>插枪后点击「开始充电」；充满或需离开时结束充电并支付账单。</li>
+              <li>费用按分时电价与服务费计算，详情可在「账单记录」中查看。</li>
+            </ul>
+          </article>
+        </aside>
+      </div>
+
+      <!-- 我的车辆 -->
+      <section v-show="pageTab === 'vehicles'" class="panel">
+        <div class="panel-head">
+          <h2>我的车辆</h2>
+          <button type="button" class="btn-text" :disabled="loading.vehicles" @click="loadVehicles">刷新</button>
+        </div>
+
+        <div v-if="vehicles.length" class="vehicle-cards wide">
+          <article
+            v-for="v in vehicles"
+            :key="v.vehicleId"
+            class="vehicle-card static"
+            :class="{ active: selectedVehicleId === v.vehicleId }"
+            @click="selectedVehicleId = v.vehicleId"
+          >
+            <span class="plate">{{ v.plateNumber }}</span>
+            <span class="meta">{{ v.model }}</span>
+            <span class="cap">电池 {{ v.batteryCapacity }} kWh</span>
+          </article>
+        </div>
+        <p v-else class="muted">暂无车辆，请填写下方信息完成绑定。</p>
+
+        <div class="bind-section">
+          <h3>绑定新车辆</h3>
+          <form class="bind-form" @submit.prevent="handleBindVehicle">
+            <div class="bind-grid">
+              <label>
+                <span>车牌号</span>
+                <input v-model="vehicleForm.plateNumber" placeholder="例如 京A12345" required />
+              </label>
+              <label>
+                <span>车型</span>
+                <input v-model="vehicleForm.model" placeholder="例如 Tesla Model 3" required />
+              </label>
+              <label>
+                <span>电池容量 (kWh)</span>
+                <input v-model.number="vehicleForm.batteryCapacity" type="number" step="0.1" required />
+              </label>
+            </div>
+            <button type="submit" class="btn-primary" :disabled="loading.bind">
+              {{ loading.bind ? '绑定中…' : '确认绑定' }}
+            </button>
+          </form>
+        </div>
+      </section>
+
+      <!-- 我的订单 -->
+      <section v-show="pageTab === 'orders'" class="panel">
+        <div class="panel-head">
+          <h2>我的充电订单</h2>
+          <button type="button" class="btn-text" :disabled="loading.orders" @click="loadOrders">刷新</button>
+        </div>
+        <p class="muted">查看全部充电预约与完成情况；进行中的订单可点击「继续处理」返回预约页。</p>
+
+        <p v-if="!orders.length" class="empty-block muted">暂无订单，提交预约后会显示在这里。</p>
+
+        <div v-else class="table-wrap">
+          <table class="bill-table">
+            <thead>
+              <tr>
+                <th>订单号</th>
+                <th>车辆</th>
+                <th>方式</th>
+                <th>目标 / 已充</th>
+                <th>桩位</th>
+                <th>状态</th>
+                <th>下单时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="order in orders" :key="order.requestId">
+                <td><strong>#{{ order.requestId }}</strong></td>
+                <td>{{ order.plateNumber || '—' }}</td>
+                <td>{{ getStatusDesc('chargeMode', order.mode) }}</td>
+                <td>{{ order.targetAmount }} / {{ order.chargedAmount ?? 0 }} kWh</td>
+                <td>{{ order.assignedPileId ? `#${order.assignedPileId}` : '—' }}</td>
+                <td>
+                  <span class="status-pill small" :class="orderStatusClass(order.status)">
+                    {{ getStatusDesc('chargingRequestStatus', order.status) }}
+                  </span>
+                </td>
+                <td class="time-cell">{{ formatTime(order.createdAt) }}</td>
+                <td>
+                  <button
+                    v-if="!isOrderTerminal(order.status)"
+                    type="button"
+                    class="btn-text"
+                    @click="openOrder(order)"
+                  >
+                    继续处理
+                  </button>
+                  <span v-else class="muted">已完成</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 账单记录 -->
+      <section v-show="pageTab === 'bills'" class="panel">
+        <div class="panel-head">
+          <h2>账单记录</h2>
+          <button type="button" class="btn-text" :disabled="loading.bills" @click="loadBills">刷新</button>
+        </div>
+
+        <p v-if="!bills.length" class="empty-block muted">暂无账单，完成一次充电后会自动生成。</p>
+
+        <div v-else class="table-wrap">
+          <table class="bill-table">
+            <thead>
+              <tr>
+                <th>账单号</th>
+                <th>电费</th>
+                <th>服务费</th>
+                <th>合计</th>
+                <th>状态</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="bill in bills" :key="bill.billId">
+                <td><strong>#{{ bill.billId }}</strong></td>
+                <td>¥ {{ bill.electricityFee }}</td>
+                <td>¥ {{ bill.serviceFee }}</td>
+                <td><strong>¥ {{ bill.totalFee }}</strong></td>
+                <td>
+                  <span class="status-pill small" :class="bill.status.toLowerCase()">
+                    {{ getStatusDesc('billStatus', bill.status) }}
+                  </span>
+                </td>
+                <td>
+                  <button
+                    v-if="bill.status === 'UNPAID'"
+                    type="button"
+                    class="btn-pay"
+                    :disabled="loading.pay === bill.billId"
+                    @click="handlePayBill(bill.billId)"
+                  >
+                    去支付
+                  </button>
+                  <span v-else class="muted">—</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </template>
+  </div>
+</template>
+
+<script>
+import {
+  registerUser,
+  loginUser,
+  bindVehicle,
+  getUserVehicles,
+  submitChargingRequest,
+  getChargingRequest,
+  getUserChargingRequests,
+  cancelChargingRequest,
+  modifyChargingRequest,
+  getSchedulerQueue,
+  dispatchScheduler,
+  startSession,
+  stopSession,
+  getUserBills,
+  payBill
+} from '../api';
+import { getStatusDesc } from '../api/enums';
+import QueueList from '../components/QueueList.vue';
+
+const STORAGE_KEY = 'charging_user_session';
+
+export default {
+  name: 'UserPortal',
+  components: { QueueList },
+  data() {
+    return {
+      authTab: 'login',
+      pageTab: 'charge',
+      session: { userId: null, username: '', token: '' },
+      registerForm: { username: '', password: '', phone: '' },
+      loginForm: { username: '', password: '' },
+      vehicleForm: { plateNumber: '', model: '', batteryCapacity: 60 },
+      vehicles: [],
+      selectedVehicleId: null,
+      requestForm: { mode: 'FAST', targetAmount: 30 },
+      activeRequest: null,
+      queueInfo: {},
+      dispatchResult: null,
+      currentSession: null,
+      stopForm: { chargedAmount: 30 },
+      stopResult: null,
+      bills: [],
+      orders: [],
+      message: '',
+      messageType: 'info',
+      pageTabs: [
+        { id: 'charge', label: '预约充电' },
+        { id: 'orders', label: '我的订单' },
+        { id: 'vehicles', label: '我的车辆' },
+        { id: 'bills', label: '账单记录' }
+      ],
+      loading: {
+        register: false,
+        login: false,
+        vehicles: false,
+        bind: false,
+        request: false,
+        refreshRequest: false,
+        cancel: false,
+        modify: false,
+        queue: false,
+        dispatch: false,
+        start: false,
+        stop: false,
+        bills: false,
+        orders: false,
+        pay: null
+      }
+    };
+  },
+  computed: {
+    canCancel() {
+      return this.activeRequest && ['WAITING', 'ASSIGNED'].includes(this.activeRequest.status);
+    },
+    canStartSession() {
+      return (
+        this.activeRequest &&
+        this.activeRequest.status === 'ASSIGNED' &&
+        this.activeRequest.assignedPileId &&
+        !this.currentSession
+      );
+    },
+    isTerminalRequest() {
+      return this.activeRequest && ['CANCELLED', 'COMPLETED'].includes(this.activeRequest.status);
+    },
+    unpaidCount() {
+      return this.bills.filter((b) => b.status === 'UNPAID').length;
+    },
+    ongoingOrderCount() {
+      return this.orders.filter((o) => !this.isOrderTerminal(o.status)).length;
+    },
+    orderStatusText() {
+      if (this.currentSession) return '充电中';
+      if (!this.activeRequest) return '';
+      return getStatusDesc('chargingRequestStatus', this.activeRequest.status);
+    },
+    statusPillClass() {
+      if (this.currentSession) return 'charging';
+      if (!this.activeRequest) return '';
+      const s = this.activeRequest.status;
+      if (s === 'WAITING') return 'waiting';
+      if (s === 'ASSIGNED') return 'assigned';
+      if (s === 'CHARGING') return 'charging';
+      return '';
+    },
+    displayCharged() {
+      if (this.currentSession) return Number(this.currentSession.chargedAmount ?? 0).toFixed(1);
+      return Number(this.activeRequest?.chargedAmount ?? 0).toFixed(1);
+    },
+    displayTarget() {
+      if (this.currentSession) return this.currentSession.targetAmount;
+      return this.activeRequest?.targetAmount ?? this.requestForm.targetAmount;
+    },
+    chargePercent() {
+      const target = Number(this.displayTarget) || 1;
+      const charged = Number(this.displayCharged) || 0;
+      return Math.min(100, Math.round((charged / target) * 100));
+    },
+    flowSteps() {
+      const hasVehicle = this.vehicles.length > 0;
+      const hasRequest = this.activeRequest && !this.isTerminalRequest;
+      const charging = !!this.currentSession || this.activeRequest?.status === 'CHARGING';
+      const paid = this.bills.some((b) => b.status === 'PAID');
+      return [
+        { id: 'vehicle', label: '选择车辆', done: hasVehicle, current: !hasVehicle },
+        { id: 'book', label: '提交预约', done: hasRequest || charging, current: hasVehicle && !hasRequest && !charging },
+        { id: 'charge', label: '到站充电', done: charging || this.activeRequest?.status === 'COMPLETED', current: hasRequest && !charging },
+        { id: 'pay', label: '支付账单', done: paid, current: !paid && this.activeRequest?.status === 'COMPLETED' }
+      ];
+    }
+  },
+  mounted() {
+    this.restoreSession();
+  },
+  methods: {
+    getStatusDesc,
+    isOrderTerminal(status) {
+      return ['CANCELLED', 'COMPLETED'].includes(status);
+    },
+    orderStatusClass(status) {
+      if (status === 'WAITING') return 'waiting';
+      if (status === 'ASSIGNED') return 'assigned';
+      if (status === 'CHARGING') return 'charging';
+      if (status === 'COMPLETED') return 'paid';
+      if (status === 'CANCELLED') return 'cancelled';
+      return '';
+    },
+    formatTime(value) {
+      if (!value) return '—';
+      return String(value).replace('T', ' ').slice(0, 16);
+    },
+    openOrder(order) {
+      this.activeRequest = order;
+      this.requestForm.mode = order.mode;
+      this.requestForm.targetAmount = order.targetAmount;
+      this.pageTab = 'charge';
+      this.loadQueue();
+      this.notify(`已打开订单 #${order.requestId}`, 'info');
+    },
+    syncActiveFromOrders() {
+      const ongoing = this.orders.find((o) => !this.isOrderTerminal(o.status));
+      if (ongoing) {
+        this.activeRequest = ongoing;
+        this.requestForm.mode = ongoing.mode;
+      }
+    },
+    switchMode(mode) {
+      this.requestForm.mode = mode;
+      this.loadQueue();
+    },
+    notify(text, type = 'info') {
+      this.message = text;
+      this.messageType = type;
+    },
+    saveSession() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.session));
+    },
+    restoreSession() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return;
+        const saved = JSON.parse(raw);
+        if (saved.userId) {
+          this.session = saved;
+          this.loginForm.username = saved.username || '';
+          this.loadVehicles();
+          this.loadBills();
+          this.loadOrders();
+          this.loadQueue();
+        }
+      } catch {
+        localStorage.removeItem(STORAGE_KEY);
+      }
+    },
+    logout() {
+      this.session = { userId: null, username: '', token: '' };
+      localStorage.removeItem(STORAGE_KEY);
+      this.vehicles = [];
+      this.selectedVehicleId = null;
+      this.activeRequest = null;
+      this.currentSession = null;
+      this.bills = [];
+      this.orders = [];
+      this.pageTab = 'charge';
+      this.notify('已退出登录', 'info');
+    },
+    async handleRegister() {
+      this.loading.register = true;
+      try {
+        await registerUser(this.registerForm);
+        this.authTab = 'login';
+        this.loginForm.username = this.registerForm.username;
+        this.loginForm.password = this.registerForm.password;
+        this.notify('注册成功，请登录', 'success');
+      } catch (err) {
+        this.notify(err.message || '注册失败', 'error');
+      } finally {
+        this.loading.register = false;
+      }
+    },
+    async handleLogin() {
+      this.loading.login = true;
+      try {
+        const res = await loginUser(this.loginForm);
+        this.session = { userId: res.userId, username: res.username, token: res.token };
+        this.saveSession();
+        this.notify(`欢迎回来，${res.username}`, 'success');
+        await this.loadVehicles();
+        await this.loadBills();
+        await this.loadOrders();
+        await this.loadQueue();
+      } catch (err) {
+        this.notify(err.message || '登录失败', 'error');
+      } finally {
+        this.loading.login = false;
+      }
+    },
+    async loadVehicles() {
+      if (!this.session.userId) return;
+      this.loading.vehicles = true;
+      try {
+        this.vehicles = await getUserVehicles(this.session.userId);
+        if (this.vehicles.length && !this.selectedVehicleId) {
+          this.selectedVehicleId = this.vehicles[0].vehicleId;
+        }
+      } catch (err) {
+        this.notify(err.message || '加载车辆失败', 'error');
+      } finally {
+        this.loading.vehicles = false;
+      }
+    },
+    async handleBindVehicle() {
+      this.loading.bind = true;
+      try {
+        const vehicle = await bindVehicle({ userId: this.session.userId, ...this.vehicleForm });
+        this.selectedVehicleId = vehicle.vehicleId;
+        await this.loadVehicles();
+        this.notify(`已绑定 ${vehicle.plateNumber}`, 'success');
+      } catch (err) {
+        this.notify(err.message || '绑车失败', 'error');
+      } finally {
+        this.loading.bind = false;
+      }
+    },
+    async handleSubmitRequest() {
+      if (!this.selectedVehicleId) {
+        this.notify('请先选择或绑定车辆', 'error');
+        this.pageTab = 'vehicles';
+        return;
+      }
+      this.loading.request = true;
+      try {
+        this.activeRequest = await submitChargingRequest({
+          userId: this.session.userId,
+          vehicleId: this.selectedVehicleId,
+          mode: this.requestForm.mode,
+          targetAmount: this.requestForm.targetAmount
+        });
+        this.stopForm.chargedAmount = this.requestForm.targetAmount;
+        this.dispatchResult = null;
+        this.currentSession = null;
+        this.stopResult = null;
+        await this.loadQueue();
+        await this.loadOrders();
+        this.notify('预约已提交，请等待分配充电桩', 'success');
+      } catch (err) {
+        this.notify(err.message || '提交失败', 'error');
+      } finally {
+        this.loading.request = false;
+      }
+    },
+    async refreshActiveRequest() {
+      if (!this.activeRequest?.requestId) return;
+      this.loading.refreshRequest = true;
+      try {
+        this.activeRequest = await getChargingRequest(this.activeRequest.requestId, this.session.userId);
+        if (this.activeRequest.assignedPileId && !this.dispatchResult) {
+          this.dispatchResult = { pileCode: `#${this.activeRequest.assignedPileId}` };
+        }
+        await this.loadOrders();
+      } catch (err) {
+        this.notify(err.message || '刷新失败', 'error');
+      } finally {
+        this.loading.refreshRequest = false;
+      }
+    },
+    async handleCancelRequest() {
+      if (!window.confirm('确定要取消当前充电订单吗？')) return;
+      this.loading.cancel = true;
+      try {
+        this.activeRequest = await cancelChargingRequest(this.activeRequest.requestId, this.session.userId);
+        this.dispatchResult = null;
+        await this.loadOrders();
+        this.notify('订单已取消', 'success');
+      } catch (err) {
+        this.notify(err.message || '取消失败', 'error');
+      } finally {
+        this.loading.cancel = false;
+      }
+    },
+    async handleModifyRequest() {
+      const input = window.prompt('新的目标电量 (kWh)', String(this.activeRequest.targetAmount));
+      if (input === null) return;
+      const targetAmount = Number(input);
+      if (!Number.isFinite(targetAmount) || targetAmount <= 0) {
+        this.notify('请输入有效电量', 'error');
+        return;
+      }
+      this.loading.modify = true;
+      try {
+        this.activeRequest = await modifyChargingRequest(
+          this.activeRequest.requestId,
+          this.session.userId,
+          { targetAmount }
+        );
+        this.requestForm.targetAmount = targetAmount;
+        this.notify('目标电量已更新', 'success');
+      } catch (err) {
+        this.notify(err.message || '修改失败', 'error');
+      } finally {
+        this.loading.modify = false;
+      }
+    },
+    async loadQueue() {
+      this.loading.queue = true;
+      try {
+        this.queueInfo = await getSchedulerQueue(this.requestForm.mode);
+      } catch (err) {
+        this.notify(err.message || '加载队列失败', 'error');
+      } finally {
+        this.loading.queue = false;
+      }
+    },
+    async handleDispatch() {
+      this.loading.dispatch = true;
+      try {
+        this.dispatchResult = await dispatchScheduler({ mode: this.requestForm.mode });
+        if (this.activeRequest) await this.refreshActiveRequest();
+        await this.loadQueue();
+        await this.loadOrders();
+        this.notify(`已分配 ${this.dispatchResult.pileCode} 号充电桩`, 'success');
+      } catch (err) {
+        this.notify(err.message || '暂时无法分配，请稍后再试', 'error');
+      } finally {
+        this.loading.dispatch = false;
+      }
+    },
+    async handleStartSession() {
+      this.loading.start = true;
+      try {
+        this.currentSession = await startSession({
+          requestId: this.activeRequest.requestId,
+          pileId: this.activeRequest.assignedPileId
+        });
+        await this.refreshActiveRequest();
+        this.stopForm.chargedAmount = this.currentSession.targetAmount;
+        this.notify('充电已开始', 'success');
+      } catch (err) {
+        this.notify(err.message || '启动失败，请确认已插枪', 'error');
+      } finally {
+        this.loading.start = false;
+      }
+    },
+    async handleStopSession() {
+      this.loading.stop = true;
+      try {
+        this.stopResult = await stopSession(this.currentSession.sessionId, {
+          chargedAmount: this.stopForm.chargedAmount
+        });
+        this.currentSession = null;
+        await this.refreshActiveRequest();
+        await this.loadOrders();
+        await this.loadBills();
+        this.pageTab = 'bills';
+        this.notify(`充电结束，请支付 ¥${this.stopResult.bill?.totalFee}`, 'success');
+      } catch (err) {
+        this.notify(err.message || '结束充电失败', 'error');
+      } finally {
+        this.loading.stop = false;
+      }
+    },
+    async loadBills() {
+      if (!this.session.userId) return;
+      this.loading.bills = true;
+      try {
+        this.bills = await getUserBills(this.session.userId);
+      } catch (err) {
+        this.notify(err.message || '加载账单失败', 'error');
+      } finally {
+        this.loading.bills = false;
+      }
+    },
+    async loadOrders() {
+      if (!this.session.userId) return;
+      this.loading.orders = true;
+      try {
+        this.orders = await getUserChargingRequests(this.session.userId);
+        this.syncActiveFromOrders();
+      } catch (err) {
+        this.notify(err.message || '加载订单失败', 'error');
+      } finally {
+        this.loading.orders = false;
+      }
+    },
+    async handlePayBill(billId) {
+      this.loading.pay = billId;
+      try {
+        const result = await payBill(billId, { paymentMethod: 'WECHAT' });
+        await this.loadBills();
+        this.notify(`支付成功 ¥${result.amount}`, 'success');
+      } catch (err) {
+        this.notify(err.message || '支付失败', 'error');
+      } finally {
+        this.loading.pay = null;
+      }
+    }
+  }
+};
+</script>
+
+<style scoped>
+.user-portal {
+  min-height: 100vh;
+  padding: 40px 24px 64px;
+  color: #172033;
+  background:
+    radial-gradient(circle at top left, rgba(163, 220, 180, 0.35), transparent 28%),
+    linear-gradient(180deg, #f5fbf7 0%, #eef3fb 100%);
+}
+
+.hero,
+.panel,
+.highlights,
+.page-tabs,
+.step-track,
+.banner,
+.layout-main,
+.auth-panel {
+  max-width: 1120px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.eyebrow {
+  margin: 0 0 10px;
+  font-size: 12px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #1e6b3a;
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: clamp(28px, 4vw, 44px);
+  line-height: 1.15;
+}
+
+.hero.compact {
+  margin-bottom: 8px;
+}
+
+.hero-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.subtitle {
+  margin: 14px 0 0;
+  max-width: 640px;
+  line-height: 1.7;
+  color: #4a5670;
+}
+
+.highlights {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin-top: 28px;
+}
+
+.highlight-card {
+  padding: 22px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 12px 40px rgba(31, 44, 71, 0.06);
+}
+
+.highlight-icon {
+  font-size: 28px;
+}
+
+.highlight-card h3 {
+  margin: 10px 0 6px;
+  font-size: 17px;
+}
+
+.highlight-card p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #69748b;
+}
+
+.panel {
+  margin-top: 24px;
+  padding: 24px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 16px 48px rgba(31, 44, 71, 0.07);
+}
+
+.auth-panel {
+  max-width: 440px;
+}
+
+.auth-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  padding: 4px;
+  border-radius: 12px;
+  background: #f0f4f8;
+}
+
+.auth-tabs button {
+  flex: 1;
+  padding: 10px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: #69748b;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.auth-tabs button.active {
+  background: #fff;
+  color: #172033;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(31, 44, 71, 0.08);
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.auth-form label span,
+.field-label,
+.bind-form label span {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+  color: #69748b;
+}
+
+.auth-form input,
+.bind-form input,
+.field-block input,
+.stop-field input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid rgba(23, 32, 51, 0.12);
+  border-radius: 12px;
+  font-size: 15px;
+}
+
+.page-tabs {
+  display: flex;
+  gap: 8px;
+  margin-top: 20px;
+  flex-wrap: wrap;
+}
+
+.page-tabs button {
+  position: relative;
+  padding: 10px 18px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.7);
+  color: #69748b;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.page-tabs button.active {
+  background: #172033;
+  color: #fff;
+}
+
+.tab-badge {
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  background: #bc3b2f;
+  color: #fff;
+}
+
+.step-track {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin: 20px auto 0;
+  padding: 0;
+  list-style: none;
+}
+
+.step-track li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #69748b;
+}
+
+.step-num {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 12px;
+  background: #edf1f7;
+}
+
+.step-track li.done .step-num {
+  background: rgba(30, 107, 58, 0.15);
+  color: #1e6b3a;
+}
+
+.step-track li.current .step-text {
+  color: #172033;
+  font-weight: 600;
+}
+
+.step-track li.current .step-num {
+  background: #172033;
+  color: #fff;
+}
+
+.banner {
+  margin-top: 16px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-size: 14px;
+}
+
+.banner.success { background: rgba(30, 107, 58, 0.1); color: #1e6b3a; }
+.banner.error { background: rgba(188, 59, 47, 0.1); color: #bc3b2f; }
+.banner.info { background: rgba(45, 93, 183, 0.1); color: #2d5db7; }
+
+.layout-main {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 20px;
+  margin-top: 20px;
+  align-items: start;
+}
+
+.layout-primary .panel {
+  margin-top: 0;
+}
+
+.layout-side .panel {
+  margin-top: 0;
+}
+
+.layout-side .panel + .panel {
+  margin-top: 16px;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.panel-head h2,
+.panel h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.panel h3 {
+  margin: 0 0 12px;
+  font-size: 16px;
+}
+
+.order-id {
+  font-size: 13px;
+  color: #69748b;
+}
+
+.order-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.status-pill {
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  background: #edf1f7;
+  color: #4a5670;
+}
+
+.status-pill.waiting { background: #fff8e6; color: #b75d2d; }
+.status-pill.assigned { background: #e8f4fd; color: #2d5db7; }
+.status-pill.charging { background: #e6f4ea; color: #1e6b3a; }
+.status-pill.unpaid { background: #fff8e6; color: #b75d2d; }
+.status-pill.paid { background: #e6f4ea; color: #1e6b3a; }
+.status-pill.cancelled { background: #f0f0f0; color: #69748b; }
+.status-pill.small { font-size: 12px; padding: 4px 10px; }
+
+.time-cell {
+  font-size: 13px;
+  color: #69748b;
+  white-space: nowrap;
+}
+
+.pile-tag {
+  font-size: 14px;
+  color: #1e6b3a;
+  font-weight: 600;
+}
+
+.order-progress {
+  margin-bottom: 20px;
+}
+
+.progress-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: #edf1f7;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #1e6b3a, #39c179);
+  transition: width 0.4s ease;
+}
+
+.progress-caption {
+  margin: 8px 0 0;
+  font-size: 14px;
+  color: #69748b;
+}
+
+.order-details {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin: 0 0 20px;
+}
+
+.order-details div {
+  padding: 12px;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.order-details dt {
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: #69748b;
+}
+
+.order-details dd {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.order-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.stop-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 140px;
+}
+
+.notice {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.notice.success {
+  background: rgba(30, 107, 58, 0.08);
+  color: #1e6b3a;
+}
+
+.field-label {
+  margin: 16px 0 10px;
+  font-size: 13px;
+  color: #69748b;
+}
+
+.field-block {
+  display: block;
+  margin-top: 16px;
+}
+
+.vehicle-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.vehicle-cards.wide {
+  margin-bottom: 24px;
+}
+
+.vehicle-card {
+  min-width: 140px;
+  padding: 14px 16px;
+  border: 2px solid rgba(23, 32, 51, 0.08);
+  border-radius: 14px;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.vehicle-card.static {
+  cursor: pointer;
+}
+
+.vehicle-card.active {
+  border-color: #1e6b3a;
+  background: rgba(30, 107, 58, 0.04);
+}
+
+.vehicle-card .plate {
+  display: block;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.vehicle-card .meta,
+.vehicle-card .cap {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: #69748b;
+}
+
+.mode-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.mode-card {
+  padding: 16px;
+  border: 2px solid rgba(23, 32, 51, 0.08);
+  border-radius: 14px;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mode-card.active {
+  border-color: #1e6b3a;
+  background: rgba(30, 107, 58, 0.04);
+}
+
+.mode-card strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 16px;
+}
+
+.mode-card span {
+  font-size: 12px;
+  color: #69748b;
+}
+
+.queue-summary {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: #69748b;
+}
+
+.tips-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: #69748b;
+}
+
+.tips-list li {
+  margin-bottom: 8px;
+}
+
+.bind-section {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid rgba(23, 32, 51, 0.08);
+}
+
+.bind-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.table-wrap {
+  overflow-x: auto;
+  margin-top: 8px;
+}
+
+.bill-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.bill-table th,
+.bill-table td {
+  padding: 12px 10px;
+  text-align: left;
+  border-bottom: 1px solid rgba(23, 32, 51, 0.08);
+}
+
+.bill-table th {
+  font-size: 12px;
+  font-weight: 600;
+  color: #69748b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.empty-block {
+  padding: 24px;
+  text-align: center;
+  border-radius: 14px;
+  background: #f8fafc;
+}
+
+.empty-block p {
+  margin: 0 0 12px;
+}
+
+.muted {
+  color: #69748b;
+  font-size: 14px;
+}
+
+.btn-primary,
+.btn-secondary,
+.btn-outline,
+.btn-pay {
+  padding: 11px 18px;
+  border: none;
+  border-radius: 999px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.btn-primary {
+  background: #172033;
+  color: #fff;
+}
+
+.btn-primary.wide {
+  width: 100%;
+  margin-top: 20px;
+  padding: 14px;
+  font-size: 15px;
+}
+
+.btn-secondary {
+  background: #fff;
+  color: #172033;
+  border: 1px solid rgba(23, 32, 51, 0.15);
+}
+
+.btn-outline {
+  flex-shrink: 0;
+  background: transparent;
+  color: #69748b;
+  border: 1px solid rgba(23, 32, 51, 0.15);
+}
+
+.btn-text {
+  padding: 8px 12px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #2d5db7;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.btn-text.danger {
+  color: #bc3b2f;
+}
+
+.btn-pay {
+  padding: 6px 14px;
+  background: #07c160;
+  color: #fff;
+  font-size: 13px;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+@media (max-width: 900px) {
+  .layout-main {
+    grid-template-columns: 1fr;
+  }
+
+  .order-details {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .user-portal {
+    padding: 28px 16px 48px;
+  }
+
+  .hero-row {
+    flex-direction: column;
+  }
+
+  .mode-cards {
+    grid-template-columns: 1fr;
+  }
+}
+</style>

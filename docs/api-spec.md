@@ -383,6 +383,43 @@ USER / ADMIN
 
 ---
 
+## 4.5 查询用户充电订单列表
+
+| 项目   | 内容                                       |
+| ---- | ---------------------------------------- |
+| 接口   | `GET /api/users/{userId}/charging-requests` |
+| 兼容   | `GET /api/charging-requests/user/{userId}`（同上） |
+| 负责人  | B + E（前端展示）                              |
+| 功能   | 查询某用户全部充电请求，按创建时间倒序                      |
+| 路径参数 | `userId`                                 |
+| 返回   | 充电请求列表（含 `plateNumber`）                   |
+
+响应示例：
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": [
+    {
+      "requestId": 1001,
+      "userId": 1,
+      "vehicleId": 1,
+      "plateNumber": "京A12345",
+      "mode": "FAST",
+      "targetAmount": 30.0,
+      "chargedAmount": 30.0,
+      "status": "COMPLETED",
+      "queueNumber": 1,
+      "assignedPileId": 1,
+      "createdAt": "2026-06-13T10:00:00"
+    }
+  ]
+}
+```
+
+---
+
 # 5. 充电桩模块接口
 
 ## 5.1 查询全部充电桩
