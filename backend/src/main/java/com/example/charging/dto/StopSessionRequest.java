@@ -8,4 +8,6 @@ import java.math.BigDecimal;
 public class StopSessionRequest {
 
     private BigDecimal chargedAmount;
+    private java.time.LocalDateTime mockStartTime;
+    private Integer mockChargingHours;
 }
