@@ -1,4 +1,4 @@
-package com.example.charging.common;
+package com.example.charging.config;
 
 import com.example.charging.common.ApiResponse;
 import org.springframework.web.bind.annotation.ExceptionHandler;
