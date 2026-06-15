@@ -5,6 +5,9 @@
 
 相关文档：
 - [api-spec.md](./api-spec.md) — 接口规范（前后端通用，包含完整的请求 / 响应定义与状态枚举）
+- [b-handoff.md](./b-handoff.md) — B 模块（用户 / 车辆 / 充电请求）交接
+- [c-handoff.md](./c-handoff.md) — C 模块（调度 / 充电桩 / 会话）交接
+- [e-handoff.md](./e-handoff.md) — E 模块（用户端 + 管理端 + 前端集成）交接
 
 ---
 
@@ -79,15 +82,20 @@ smart-charging-system/
 │       ├── main.js
 │       ├── App.vue
 │       ├── api/request.js          # 统一 axios 实例（自动拦截 ApiResponse）
-│       ├── api/index.js            # 已封装：getHealth / initSystem / getPrices / calcFee / getStations / getEnums
+│       ├── api/index.js            # 全量 API：B/C/D/E 主流程 + 公共接口
 │       ├── api/enums.js            # 前端状态 → 中文映射（与后端 enum 值一一对应）
-│       ├── router/index.js         # 路由：/（Home）、/stations
+│       ├── router/index.js         # 路由：/ /user /admin /stations
 │       ├── views/Home.vue
+│       ├── views/User.vue          # E：用户端主流程
 │       ├── views/Stations.vue
-│       └── components/StationCard.vue
+│       ├── views/Admin.vue           # E：管理端 Dashboard
+│       └── components/StationCard.vue, QueueList.vue
 ├── docs/
 │   ├── api-spec.md                 # 📖 当前团队约定的接口规范（主流程 11 个模块）
-│   └── development-guide.md        # 本文件
+│   ├── development-guide.md        # 本文件
+│   ├── b-handoff.md                # B 模块交接
+│   ├── c-handoff.md                # C 模块交接
+│   └── e-handoff.md                # E 模块交接
 ├── README.md
 └── .gitignore
 ```
@@ -102,6 +110,11 @@ smart-charging-system/
 | 初始化接口 | `POST /api/init` | 一键生成 1 个充电站 + 2 快充 + 3 慢充 + 9 条 (period, mode) 默认电价 |
 | 枚举查询 | `GET /api/enums` | 所有状态枚举的 `code / desc` 映射，前端页面展示状态文案时请走该接口 |
 | 电价查询 | `GET /api/fees/prices` | 所有 `(period, mode)` 电价 |
+| 管理端概览 | `GET /api/admin/dashboard` | 用户数、请求数、收入、桩状态分布等运营统计（E 模块） |
+| 管理端桩监控 | `GET /api/admin/piles` | 全部充电桩及当前充电会话（E 模块） |
+| 管理端队列 | `GET /api/admin/queue` | 快充 + 慢充等待队列一览（E 模块，复用 C 调度服务） |
+| 用户端页面 | `/user` | 注册→绑车→充电请求→调度→会话→账单→支付（E 模块） |
+| Axios 全量封装 | `frontend/src/api/index.js` | B/C/D/E 主流程接口函数（E 模块） |
 
 ### 1.3 统一后的状态枚举（已与 api-spec.md 对齐 ✅）
 
@@ -317,6 +330,6 @@ public ResponseEntity<Resource> export() { ... }
 1. **B 先实现用户 / 车辆 / 充电请求模块**：这是主流程的起点；把 `ChargingRequest.status` 从 WAITING → ASSIGNED 的流转接口先搭起来。
 2. **C 并行实现充电桩 / 调度 / 会话模块**：与 B 的请求模块有状态交集，先把 `request.status = ASSIGNED`、`pile.status = IDLE → RESERVED → CHARGING → IDLE` 以及 `session.status = CHARGING → COMPLETED / INTERRUPTED` 的状态流转写清楚。
 3. **D 负责账单与支付**：依赖 C 的 session，在结束充电时通过 `FeeService.calculate` 生成 Bill，并实现 `/api/bills/{billId}/pay`。
-4. **E 做管理端 Dashboard**：复用上述所有模块的查询接口。
+4. **E 做用户端、管理端与前后端集成**：含 Admin Dashboard 与全量 Axios 封装。详见 [e-handoff.md](./e-handoff.md)。
 
 对某个接口的语义 / 字段含义有疑问时，**先在 `docs/api-spec.md` 里找答案**；仍然不清的，在团队群里 @ A 确认后再开发，避免返工。

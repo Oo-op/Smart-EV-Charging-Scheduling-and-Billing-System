@@ -18,4 +18,6 @@ public class ChargingRequestDetailDTO {
     private Integer queueNumber;
     private Long assignedPileId;
     private LocalDateTime createdAt;
+    /** 列表展示用：关联车辆车牌 */
+    private String plateNumber;
 }

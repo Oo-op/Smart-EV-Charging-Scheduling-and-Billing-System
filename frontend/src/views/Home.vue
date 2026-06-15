@@ -67,20 +67,26 @@
         <ul>
           <li>统一响应包装与全局异常处理</li>
           <li>健康检查、系统初始化、充电站查询、枚举查询</li>
-          <li>分时计费能力和前端 API 封装</li>
+          <li>分时计费能力和完整 Axios API 封装</li>
+          <li>用户端主流程页面（注册→充电→账单→支付）</li>
+          <li>管理端 Dashboard（运营概览、桩监控、队列、故障处理）</li>
         </ul>
       </div>
       <div>
-        <h2>下一步建议</h2>
+        <h2>快速入口</h2>
         <ul>
-          <li>补用户、车辆、充电请求、调度、账单支付主链路</li>
-          <li>把站点页扩展为充电桩与队列视图</li>
-          <li>补最小集成测试，固定初始化数据和计费示例</li>
+          <li><RouterLink to="/user">用户端</RouterLink> — 完整充电业务演示</li>
+          <li><RouterLink to="/admin">管理端</RouterLink> — 运营监控与故障处理</li>
+          <li><RouterLink to="/stations">充电站</RouterLink> — 站点列表</li>
         </ul>
       </div>
     </section>
 
-    <RouterLink class="stations-link" to="/stations">查看充电站列表</RouterLink>
+    <div class="link-row">
+      <RouterLink class="stations-link" to="/user">进入用户端</RouterLink>
+      <RouterLink class="stations-link" to="/admin">进入管理后台</RouterLink>
+      <RouterLink class="stations-link" to="/stations">查看充电站列表</RouterLink>
+    </div>
   </div>
 </template>
 
@@ -270,9 +276,17 @@ button:not(:disabled):hover,
   border-radius: 24px;
   background: rgba(255, 255, 255, 0.72);
 }
+.roadmap li a {
+  color: #2d5db7;
+}
+.link-row {
+  max-width: 1120px;
+  margin: 28px auto 0;
+}
 .stations-link {
   display: inline-flex;
-  margin-top: 28px;
+  margin-top: 0;
+  margin-right: 12px;
   padding: 14px 20px;
   text-decoration: none;
 }
