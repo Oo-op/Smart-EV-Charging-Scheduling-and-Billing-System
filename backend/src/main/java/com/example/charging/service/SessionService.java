@@ -101,8 +101,8 @@ public class SessionService {
                 .orElseThrow(() -> new IllegalArgumentException("充电桩不存在"));
 
         BigDecimal actualAmount = (req == null || req.getChargedAmount() == null) ? session.getTargetAmount() : req.getChargedAmount();
-        actualAmount = safe(actualAmount).setScale(2, RoundingMode.HALF_UP);
-        LocalDateTime now = LocalDateTime.now();
+        actualAmount = safe(actualAmount);
+        LocalDateTime now = (req != null && req.getMockEndTime() != null) ? req.getMockEndTime() : LocalDateTime.now();
 
         // 模拟时间逻辑处理
         if (req != null) {
@@ -118,7 +118,7 @@ public class SessionService {
         session.setChargedAmount(actualAmount);
         session.setEndTime(now);
         session.setStatus(ChargingSessionStatus.COMPLETED);
-        request.setChargedAmount(actualAmount);
+        request.setChargedAmount(safe(request.getChargedAmount()).add(actualAmount));
         request.setStatus(ChargingRequestStatus.COMPLETED);
         pile.setStatus(ChargingPileStatus.IDLE);
 

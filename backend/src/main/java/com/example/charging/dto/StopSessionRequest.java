@@ -9,5 +9,6 @@ public class StopSessionRequest {
 
     private BigDecimal chargedAmount;
     private java.time.LocalDateTime mockStartTime;
+    private java.time.LocalDateTime mockEndTime;
     private Integer mockChargingHours;
 }

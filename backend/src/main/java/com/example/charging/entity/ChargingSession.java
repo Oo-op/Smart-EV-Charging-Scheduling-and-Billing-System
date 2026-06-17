@@ -15,10 +15,10 @@ import java.time.LocalDateTime;
 @Data
 @Entity
 @Table(name = "charging_session", indexes = {
-        @Index(name = "idx_request", columnList = "request_id"),
-        @Index(name = "idx_user", columnList = "user_id"),
-        @Index(name = "idx_pile", columnList = "pile_id"),
-        @Index(name = "idx_status", columnList = "status")
+        @Index(name = "idx_session_request", columnList = "request_id"),
+        @Index(name = "idx_session_user", columnList = "user_id"),
+        @Index(name = "idx_session_pile", columnList = "pile_id"),
+        @Index(name = "idx_session_status", columnList = "status")
 })
 public class ChargingSession {
 
@@ -47,7 +47,7 @@ public class ChargingSession {
     @Column(name = "target_amount", precision = 10, scale = 2)
     private BigDecimal targetAmount;
 
-    @Column(name = "charged_amount", precision = 10, scale = 2)
+    @Column(name = "charged_amount", precision = 15, scale = 8)
     private BigDecimal chargedAmount = BigDecimal.ZERO;
 
     /** CHARGING / COMPLETED / INTERRUPTED（见 ChargingSessionStatus） */
