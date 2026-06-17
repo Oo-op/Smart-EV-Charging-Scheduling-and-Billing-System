@@ -25,4 +25,9 @@ public class VehicleController {
     public List<VehicleDTO> listUserVehicles(@PathVariable Long userId) {
         return vehicleService.listVehiclesByUser(userId);
     }
+
+    @DeleteMapping("/vehicles/{vehicleId}")
+    public void unbindVehicle(@PathVariable Long vehicleId, @RequestParam Long userId) {
+        vehicleService.unbindVehicle(vehicleId, userId);
+    }
 }

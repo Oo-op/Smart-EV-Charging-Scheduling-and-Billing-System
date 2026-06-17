@@ -50,6 +50,10 @@ export function getUserVehicles(userId) {
   return request.get(`/users/${userId}/vehicles`);
 }
 
+export function unbindVehicle(vehicleId, userId) {
+  return request.delete(`/vehicles/${vehicleId}`, { params: { userId } });
+}
+
 // ─── B：充电请求模块 ─────────────────────────────────────────
 
 export function submitChargingRequest(payload) {

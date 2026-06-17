@@ -46,6 +46,16 @@ public class VehicleService {
                 .collect(Collectors.toList());
     }
 
+    @Transactional
+    public void unbindVehicle(Long vehicleId, Long userId) {
+        Vehicle vehicle = vehicleRepository.findById(vehicleId)
+                .orElseThrow(() -> new IllegalArgumentException("车辆不存在"));
+        if (!vehicle.getUserId().equals(userId)) {
+            throw new IllegalArgumentException("无权操作该车辆");
+        }
+        vehicleRepository.delete(vehicle);
+    }
+
     private VehicleDTO toDto(Vehicle vehicle) {
         VehicleDTO dto = new VehicleDTO();
         dto.setVehicleId(vehicle.getId());

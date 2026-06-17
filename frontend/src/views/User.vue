@@ -279,11 +279,22 @@
             :key="v.vehicleId"
             class="vehicle-card static"
             :class="{ active: selectedVehicleId === v.vehicleId }"
-            @click="selectedVehicleId = v.vehicleId"
           >
-            <span class="plate">{{ v.plateNumber }}</span>
-            <span class="meta">{{ v.model }}</span>
-            <span class="cap">电池 {{ v.batteryCapacity }} kWh</span>
+            <div @click="selectedVehicleId = v.vehicleId" class="vehicle-info">
+              <span class="plate">{{ v.plateNumber }}</span>
+              <span class="meta">{{ v.model }}</span>
+              <span class="cap">电池 {{ v.batteryCapacity }} kWh</span>
+            </div>
+            <button 
+              class="btn-delete" 
+              @click.stop="handleUnbindVehicle(v.vehicleId, v.plateNumber)"
+              title="解绑车辆"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
           </article>
         </div>
         <p v-else class="muted">暂无车辆，请填写下方信息完成绑定。</p>
@@ -425,6 +436,7 @@ import {
   loginUser,
   bindVehicle,
   getUserVehicles,
+  unbindVehicle,
   submitChargingRequest,
   getChargingRequest,
   getUserChargingRequests,
@@ -681,6 +693,21 @@ export default {
         this.notify(err.message || '绑车失败', 'error');
       } finally {
         this.loading.bind = false;
+      }
+    },
+    async handleUnbindVehicle(vehicleId, plateNumber) {
+      if (!confirm(`确定要解绑车辆 ${plateNumber} 吗？`)) {
+        return;
+      }
+      try {
+        await unbindVehicle(vehicleId, this.session.userId);
+        await this.loadVehicles();
+        if (this.selectedVehicleId === vehicleId) {
+          this.selectedVehicleId = this.vehicles.length > 0 ? this.vehicles[0].vehicleId : null;
+        }
+        this.notify(`已解绑 ${plateNumber}`, 'success');
+      } catch (err) {
+        this.notify(err.message || '解绑失败', 'error');
       }
     },
     async handleSubmitRequest() {
@@ -1324,6 +1351,36 @@ export default {
   margin-top: 4px;
   font-size: 12px;
   color: #69748b;
+}
+
+.vehicle-card.static {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.vehicle-info {
+  flex: 1;
+  cursor: pointer;
+}
+
+.btn-delete {
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.08);
+  color: #ef4444;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.btn-delete:hover {
+  background: rgba(239, 68, 68, 0.15);
+  transform: scale(1.1);
 }
 
 .mode-cards {
