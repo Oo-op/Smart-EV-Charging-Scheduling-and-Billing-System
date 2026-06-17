@@ -100,7 +100,7 @@ class AcceptanceTest {
         Checkpoint firstFailure = null;
         List<String> mismatchReports = new ArrayList<>();
 
-        PrintWriter reportWriter = new PrintWriter(new FileWriter("/Users/kettenkrad/.gemini/antigravity/brain/65fea3f5-4ffc-4daa-856a-5724f9e0f2aa/acceptance_report.md"));
+        PrintWriter reportWriter = new PrintWriter(new FileWriter("../acceptance_report.md"));
         reportWriter.println("# Acceptance Test Report");
         reportWriter.println();
         reportWriter.println("| Checkpoint | Event | Status | Details |");
