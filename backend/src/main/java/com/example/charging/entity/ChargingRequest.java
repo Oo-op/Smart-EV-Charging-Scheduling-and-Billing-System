@@ -41,7 +41,7 @@ public class ChargingRequest {
     @Column(name = "target_amount", nullable = false, precision = 10, scale = 2)
     private BigDecimal targetAmount;
 
-    @Column(name = "charged_amount", precision = 10, scale = 2)
+    @Column(name = "charged_amount", precision = 15, scale = 8)
     private BigDecimal chargedAmount = BigDecimal.ZERO;
 
     /** WAITING / ASSIGNED / CHARGING / CANCELLED / COMPLETED（见 ChargingRequestStatus） */

@@ -107,12 +107,9 @@ public class PileService {
                 .orElseThrow(() -> new IllegalArgumentException("充电请求不存在"));
 
         BigDecimal sessionCharged = chargedAmount == null ? safe(session.getChargedAmount()) : safe(chargedAmount);
-        sessionCharged = sessionCharged.setScale(2, RoundingMode.HALF_UP);
-        BigDecimal totalCharged = safe(request.getChargedAmount()).add(sessionCharged)
-                .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal totalCharged = safe(request.getChargedAmount()).add(sessionCharged);
         BigDecimal remaining = safe(request.getTargetAmount()).subtract(totalCharged)
-                .max(BigDecimal.ZERO)
-                .setScale(2, RoundingMode.HALF_UP);
+                .max(BigDecimal.ZERO);
 
         session.setChargedAmount(sessionCharged);
         session.setEndTime(LocalDateTime.now());

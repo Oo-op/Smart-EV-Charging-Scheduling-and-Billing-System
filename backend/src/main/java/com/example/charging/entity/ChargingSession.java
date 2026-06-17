@@ -47,7 +47,7 @@ public class ChargingSession {
     @Column(name = "target_amount", precision = 10, scale = 2)
     private BigDecimal targetAmount;
 
-    @Column(name = "charged_amount", precision = 10, scale = 2)
+    @Column(name = "charged_amount", precision = 15, scale = 8)
     private BigDecimal chargedAmount = BigDecimal.ZERO;
 
     /** CHARGING / COMPLETED / INTERRUPTED（见 ChargingSessionStatus） */

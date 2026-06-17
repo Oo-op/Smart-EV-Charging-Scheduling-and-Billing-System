@@ -28,15 +28,18 @@ public class DemoDataBootstrap implements ApplicationRunner {
     private final ChargingPileRepository pileRepository;
     private final ElectricityPriceRepository priceRepository;
     private final UserRepository userRepository;
+    private final ChargingProperties chargingProperties;
 
     public DemoDataBootstrap(ChargingStationRepository stationRepository,
                              ChargingPileRepository pileRepository,
                              ElectricityPriceRepository priceRepository,
-                             UserRepository userRepository) {
+                             UserRepository userRepository,
+                             ChargingProperties chargingProperties) {
         this.stationRepository = stationRepository;
         this.pileRepository = pileRepository;
         this.priceRepository = priceRepository;
         this.userRepository = userRepository;
+        this.chargingProperties = chargingProperties;
     }
 
     @Override
@@ -58,24 +61,29 @@ public class DemoDataBootstrap implements ApplicationRunner {
         Long stationId = stationRepository.findAll().get(0).getId();
 
         if (pileRepository.count() == 0) {
-            createPile(stationId, "FAST-1", ChargeMode.FAST, "60", "0.70");
-            createPile(stationId, "FAST-2", ChargeMode.FAST, "60", "0.70");
-            createPile(stationId, "SLOW-1", ChargeMode.SLOW, "7", "0.40");
-            createPile(stationId, "SLOW-2", ChargeMode.SLOW, "7", "0.40");
-            createPile(stationId, "SLOW-3", ChargeMode.SLOW, "7", "0.40");
+            String fastPower = chargingProperties.getPower().getFast().toString();
+            String slowPower = chargingProperties.getPower().getSlow().toString();
+            String serviceFee = chargingProperties.getPrice().getService().toString();
+
+            createPile(stationId, "FAST-1", ChargeMode.FAST, fastPower, serviceFee);
+            createPile(stationId, "FAST-2", ChargeMode.FAST, fastPower, serviceFee);
+            createPile(stationId, "SLOW-1", ChargeMode.SLOW, slowPower, serviceFee);
+            createPile(stationId, "SLOW-2", ChargeMode.SLOW, slowPower, serviceFee);
+            createPile(stationId, "SLOW-3", ChargeMode.SLOW, slowPower, serviceFee);
         }
 
         if (priceRepository.count() == 0) {
+            BigDecimal serviceFee = chargingProperties.getPrice().getService();
             List<Object[]> rows = Arrays.asList(
-                    new Object[]{PricePeriod.PEAK, ChargeMode.FAST, new BigDecimal("1.20"), new BigDecimal("0.70"), "08:00-11:00, 18:00-21:00"},
-                    new Object[]{PricePeriod.FLAT, ChargeMode.FAST, new BigDecimal("0.80"), new BigDecimal("0.70"), "12:00-17:00"},
-                    new Object[]{PricePeriod.VALLEY, ChargeMode.FAST, new BigDecimal("0.40"), new BigDecimal("0.70"), "22:00-07:00"},
-                    new Object[]{PricePeriod.PEAK, ChargeMode.SLOW, new BigDecimal("1.20"), new BigDecimal("0.40"), "08:00-11:00, 18:00-21:00"},
-                    new Object[]{PricePeriod.FLAT, ChargeMode.SLOW, new BigDecimal("0.80"), new BigDecimal("0.40"), "12:00-17:00"},
-                    new Object[]{PricePeriod.VALLEY, ChargeMode.SLOW, new BigDecimal("0.40"), new BigDecimal("0.40"), "22:00-07:00"},
-                    new Object[]{PricePeriod.PEAK, ChargeMode.NORMAL, new BigDecimal("1.00"), new BigDecimal("0.50"), "08:00-11:00, 18:00-21:00"},
-                    new Object[]{PricePeriod.FLAT, ChargeMode.NORMAL, new BigDecimal("0.70"), new BigDecimal("0.50"), "12:00-17:00"},
-                    new Object[]{PricePeriod.VALLEY, ChargeMode.NORMAL, new BigDecimal("0.30"), new BigDecimal("0.50"), "22:00-07:00"}
+                    new Object[]{PricePeriod.PEAK, ChargeMode.FAST, chargingProperties.getPrice().getPeak(), serviceFee, "Peak Period"},
+                    new Object[]{PricePeriod.FLAT, ChargeMode.FAST, chargingProperties.getPrice().getNormal(), serviceFee, "Flat Period"},
+                    new Object[]{PricePeriod.VALLEY, ChargeMode.FAST, chargingProperties.getPrice().getValley(), serviceFee, "Valley Period"},
+                    new Object[]{PricePeriod.PEAK, ChargeMode.SLOW, chargingProperties.getPrice().getPeak(), serviceFee, "Peak Period"},
+                    new Object[]{PricePeriod.FLAT, ChargeMode.SLOW, chargingProperties.getPrice().getNormal(), serviceFee, "Flat Period"},
+                    new Object[]{PricePeriod.VALLEY, ChargeMode.SLOW, chargingProperties.getPrice().getValley(), serviceFee, "Valley Period"},
+                    new Object[]{PricePeriod.PEAK, ChargeMode.NORMAL, chargingProperties.getPrice().getPeak(), serviceFee, "Peak Period"},
+                    new Object[]{PricePeriod.FLAT, ChargeMode.NORMAL, chargingProperties.getPrice().getNormal(), serviceFee, "Flat Period"},
+                    new Object[]{PricePeriod.VALLEY, ChargeMode.NORMAL, chargingProperties.getPrice().getValley(), serviceFee, "Valley Period"}
             );
 
             for (Object[] row : rows) {

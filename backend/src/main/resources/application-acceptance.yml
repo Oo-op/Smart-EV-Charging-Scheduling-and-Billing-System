@@ -1,0 +1,33 @@
+charging:
+  price:
+    peak: 1.0
+    normal: 0.7
+    valley: 0.4
+    service: 0.8
+  power:
+    fast: 30
+    slow: 10
+  pile-count:
+    fast: 2
+    slow: 3
+  queue:
+    pile-capacity: 3
+    waiting-area-capacity: 10
+  peak-hours:
+    - 10
+    - 11
+    - 12
+    - 13
+    - 14
+    - 18
+    - 19
+    - 20
+  flat-hours:
+    - 7
+    - 8
+    - 9
+    - 15
+    - 16
+    - 17
+    - 21
+    - 22
