@@ -148,12 +148,12 @@ export default {
 }
 
 .hero {
-  max-width: 1180px;
+  max-width: 420px;
   margin: 0 auto;
-  display: grid;
-  grid-template-columns: minmax(0, 1.2fr) 380px;
-  gap: 28px;
-  align-items: start;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
 }
 
 .eyebrow {
