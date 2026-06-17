@@ -14,6 +14,9 @@
             <span class="user-name">{{ session.username }}</span>
             <span class="user-role">{{ session.role === 'ADMIN' ? '管理员' : '用户' }}</span>
           </div>
+          <button type="button" class="new-window-btn" title="在新窗口独立登录其他账号" @click="openNewWindow">
+            新窗口
+          </button>
           <button type="button" class="logout-btn" @click="logout">退出</button>
         </template>
         <RouterLink v-else class="login-link" to="/">登录</RouterLink>
@@ -25,7 +28,7 @@
 
 <script>
 import { RouterLink } from 'vue-router';
-import { authState, clearSession } from './session';
+import { authState, clearSession, openNewSessionWindow } from './session';
 
 export default {
   name: 'App',
@@ -36,6 +39,9 @@ export default {
     }
   },
   methods: {
+    openNewWindow() {
+      openNewSessionWindow('/');
+    },
     logout() {
       clearSession();
       if (this.$route.meta?.requiresAuth) {
@@ -123,6 +129,7 @@ body {
   color: rgba(255, 255, 255, 0.66);
 }
 
+.new-window-btn,
 .logout-btn,
 .login-link {
   padding: 8px 14px;

@@ -88,7 +88,7 @@ class AcceptanceTest {
         initCoreTestData();
 
         // 2. Parse CSV
-        List<Checkpoint> checkpoints = parseCSV("/Users/kettenkrad/Documents/Smart-EV-Charging-Scheduling-and-Billing-System/tests/resources/作业验收用例_测试用例.csv");
+        List<Checkpoint> checkpoints = parseCSV("../tests/resources/作业验收用例_测试用例.csv");
 
         // Initialize simulation time to the first checkpoint's time
         Checkpoint firstCp = checkpoints.get(0);
