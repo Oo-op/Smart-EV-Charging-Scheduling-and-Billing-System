@@ -11,8 +11,8 @@ import java.time.LocalDateTime;
 @Data
 @Entity
 @Table(name = "vehicle", indexes = {
-        @Index(name = "idx_user", columnList = "user_id"),
-        @Index(name = "idx_plate", columnList = "plate_number")
+        @Index(name = "idx_vehicle_user", columnList = "user_id"),
+        @Index(name = "idx_vehicle_plate", columnList = "plate_number")
 })
 public class Vehicle {
 

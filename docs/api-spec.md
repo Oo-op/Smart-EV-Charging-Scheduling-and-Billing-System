@@ -1,7 +1,6 @@
 # 智能充电桩调度计费系统接口规范表
 
-> 文档定位：这是目标接口规范，不代表仓库当前已全部实现。
-> 截至 2026-06-13，当前已实现的接口主要是 `health / init / stations / enums / fees`，其余接口仍需按本文继续落地。
+> 文档定位：这是当前仓库使用的接口约定。截止 2026-06-17，用户端、管理端、调度、会话和账单主流程均已在仓库中落地。
 
 ## 1. 全局约定
 
@@ -130,12 +129,12 @@ USER / ADMIN
     "userId": 1,
     "username": "yumo",
     "role": "USER",
-    "token": "mock-token"
+    "token": "mock:USER:1"
   }
 }
 ```
 
-第一版可以使用 mock-token，不强制实现 JWT。
+当前版本使用轻量演示 token，不强制实现 JWT。
 
 ---
 
@@ -380,6 +379,43 @@ USER / ADMIN
 ```
 
 第一版可以只允许修改 targetAmount，mode 修改可作为增强功能。
+
+---
+
+## 4.5 查询用户充电订单列表
+
+| 项目   | 内容                                       |
+| ---- | ---------------------------------------- |
+| 接口   | `GET /api/users/{userId}/charging-requests` |
+| 兼容   | `GET /api/charging-requests/user/{userId}`（同上） |
+| 负责人  | B + E（前端展示）                              |
+| 功能   | 查询某用户全部充电请求，按创建时间倒序                      |
+| 路径参数 | `userId`                                 |
+| 返回   | 充电请求列表（含 `plateNumber`）                   |
+
+响应示例：
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": [
+    {
+      "requestId": 1001,
+      "userId": 1,
+      "vehicleId": 1,
+      "plateNumber": "京A12345",
+      "mode": "FAST",
+      "targetAmount": 30.0,
+      "chargedAmount": 30.0,
+      "status": "COMPLETED",
+      "queueNumber": 1,
+      "assignedPileId": 1,
+      "createdAt": "2026-06-13T10:00:00"
+    }
+  ]
+}
+```
 
 ---
 

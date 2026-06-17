@@ -1,8 +1,18 @@
 import axios from 'axios';
+import { getSession } from '../session';
 
 const request = axios.create({
   baseURL: '/api',
   timeout: 10000
+});
+
+request.interceptors.request.use((config) => {
+  const session = getSession();
+  if (session?.token) {
+    config.headers = config.headers || {};
+    config.headers.Authorization = `Bearer ${session.token}`;
+  }
+  return config;
 });
 
 /**
@@ -22,7 +32,15 @@ request.interceptors.response.use(
     }
     return res;
   },
-  (error) => Promise.reject(error)
+  (error) => {
+    const msg =
+      error.response?.data?.message ||
+      (error.response?.status === 404
+        ? `接口不存在 (${error.config?.method?.toUpperCase()} ${error.config?.url})，请确认后端已重启`
+        : null) ||
+      error.message;
+    return Promise.reject(new Error(msg));
+  }
 );
 
 export default request;

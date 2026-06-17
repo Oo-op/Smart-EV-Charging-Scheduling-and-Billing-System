@@ -6,6 +6,8 @@ import com.example.charging.dto.ChargingRequestSubmitRequest;
 import com.example.charging.service.ChargingRequestService;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/charging-requests")
 public class ChargingRequestController {
@@ -19,6 +21,11 @@ public class ChargingRequestController {
     @PostMapping
     public ChargingRequestDetailDTO submit(@RequestBody ChargingRequestSubmitRequest request) {
         return requestService.submitRequest(request);
+    }
+
+    @GetMapping("/user/{userId}")
+    public List<ChargingRequestDetailDTO> listByUser(@PathVariable Long userId) {
+        return requestService.listByUserId(userId);
     }
 
     @GetMapping("/{requestId}")

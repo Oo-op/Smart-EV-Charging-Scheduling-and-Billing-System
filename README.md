@@ -1,57 +1,29 @@
 # Smart Charging System
 
-智能电动汽车充电管理系统。当前仓库目标是先搭一个可本地运行的基础骨架，用于后续补齐用户、车辆、排队调度、会话和账单主流程。
+一个更接近真实网页应用形态的智能充电系统示例，包含用户端与管理员后台两套入口。
 
-## 项目结构
+## 当前能力
 
-```text
-backend/                  Spring Boot 3 + Spring Data JPA
-frontend/                 Vue 3 + Vite
-docs/                     开发说明和接口规范
-```
+- 用户注册、登录、绑车、预约充电、查看订单、支付账单
+- 管理员登录、查看运营看板、监控充电桩、查看队列、处理故障桩
+- 系统启动后自动准备基础站点、充电桩、电价和默认管理员账号
+- 默认使用 H2 内存数据库，本地无需先安装 MySQL
 
-## 当前已实现
+## 默认管理员账号
 
-- 后端统一响应包装与全局异常处理
-- 健康检查：`GET /api/health`
-- 系统初始化：`POST /api/init`
-- 充电站查询：`GET /api/stations`
-- 枚举查询：`GET /api/enums`
-- 分时计费与电价查询：`POST /api/fees/calc`、`GET /api/fees/prices`
-- 前端最小控制台：健康检查、初始化演示数据、查看站点与电价
+- 用户名：`admin`
+- 密码：`admin123456`
 
-## 本地要求
+## 启动
 
-- Java 17+
-- Node.js 18+
-- Maven 3.9+
-
-仓库当前没有提交 `mvnw`，因此后端启动使用本机 `mvn`。
-
-## 快速开始
-
-### 后端
+后端：
 
 ```bash
 cd backend
 mvn spring-boot:run
 ```
 
-- API 基础路径: `http://localhost:8080/api`
-- 健康检查: `GET /api/health`
-- 默认使用 H2 内存数据库，无需本地 MySQL
-- H2 控制台: `http://localhost:8080/api/h2-console`
-
-如需切换到本地 MySQL：
-
-```bash
-cd backend
-mvn spring-boot:run -Dspring-boot.run.profiles=mysql
-```
-
-默认 MySQL 配置见 [backend/src/main/resources/application-mysql.yml](/Users/yumo.li/Desktop/EV/backend/src/main/resources/application-mysql.yml:1)。
-
-### 前端
+前端：
 
 ```bash
 cd frontend
@@ -59,18 +31,21 @@ npm install
 npm run dev
 ```
 
-- 开发地址: `http://localhost:5173`
-- Vite 会把 `/api` 代理到 `http://localhost:8080`
+访问地址：
 
-## 建议启动顺序
+- 前端：`http://localhost:5173`
+- 后端：`http://localhost:8080/api`
+- H2 控制台：`http://localhost:8080/api/h2-console`
 
-1. 启动后端。
-2. 启动前端。
-3. 打开首页先做健康检查。
-4. 点击“初始化系统”生成演示数据。
-5. 进入站点页确认 `GET /api/stations` 返回正常。
+如需切换 MySQL：
 
-## 文档
+```bash
+cd backend
+mvn spring-boot:run -Dspring-boot.run.profiles=mysql
+```
 
-- [docs/development-guide.md](/Users/yumo.li/Desktop/EV/docs/development-guide.md:1)
+配置文件见 [application-mysql.yml](/Users/yumo.li/Desktop/EV/backend/src/main/resources/application-mysql.yml:1)。
+
+## 保留文档
+
 - [docs/api-spec.md](/Users/yumo.li/Desktop/EV/docs/api-spec.md:1)

@@ -16,6 +16,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 public class ChargingRequestService {
@@ -53,13 +56,30 @@ public class ChargingRequestService {
         req.setAssignedPileId(null);
 
         ChargingRequest saved = requestRepository.save(req);
-        return toDetailDto(saved);
+        return toDetailDto(saved, vehicle.getPlateNumber());
     }
 
     public ChargingRequestDetailDTO getRequestDetail(Long requestId, Long userId) {
         ChargingRequest request = requestRepository.findByIdAndUserId(requestId, userId)
                 .orElseThrow(() -> new IllegalArgumentException("请求不存在或无权访问"));
-        return toDetailDto(request);
+        return toDetailDto(request, resolvePlateNumber(request.getVehicleId()));
+    }
+
+    public List<ChargingRequestDetailDTO> listByUserId(Long userId) {
+        userRepository.findById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("用户不存在"));
+        List<ChargingRequest> requests = requestRepository.findByUserIdOrderByCreatedAtDesc(userId);
+        Map<Long, Vehicle> vehicles = vehicleRepository.findAllById(
+                        requests.stream().map(ChargingRequest::getVehicleId).distinct().toList())
+                .stream()
+                .collect(Collectors.toMap(Vehicle::getId, Function.identity()));
+        return requests.stream()
+                .map(req -> {
+                    Vehicle vehicle = vehicles.get(req.getVehicleId());
+                    String plate = vehicle == null ? null : vehicle.getPlateNumber();
+                    return toDetailDto(req, plate);
+                })
+                .toList();
     }
 
     @Transactional
@@ -71,7 +91,7 @@ public class ChargingRequestService {
         }
         request.setStatus(ChargingRequestStatus.CANCELLED);
         ChargingRequest saved = requestRepository.save(request);
-        return toDetailDto(saved);
+        return toDetailDto(saved, resolvePlateNumber(saved.getVehicleId()));
     }
 
     @Transactional
@@ -91,7 +111,7 @@ public class ChargingRequestService {
         }
 
         ChargingRequest saved = requestRepository.save(request);
-        return toDetailDto(saved);
+        return toDetailDto(saved, resolvePlateNumber(saved.getVehicleId()));
     }
 
     private Integer generateQueueNumber(ChargeMode mode) {
@@ -100,7 +120,13 @@ public class ChargingRequestService {
         return waiting.size() + 1;
     }
 
-    private ChargingRequestDetailDTO toDetailDto(ChargingRequest request) {
+    private String resolvePlateNumber(Long vehicleId) {
+        return vehicleRepository.findById(vehicleId)
+                .map(Vehicle::getPlateNumber)
+                .orElse(null);
+    }
+
+    private ChargingRequestDetailDTO toDetailDto(ChargingRequest request, String plateNumber) {
         ChargingRequestDetailDTO dto = new ChargingRequestDetailDTO();
         dto.setRequestId(request.getId());
         dto.setUserId(request.getUserId());
@@ -112,6 +138,7 @@ public class ChargingRequestService {
         dto.setQueueNumber(request.getQueueNumber());
         dto.setAssignedPileId(request.getAssignedPileId());
         dto.setCreatedAt(request.getCreatedAt());
+        dto.setPlateNumber(plateNumber);
         return dto;
     }
 }
