@@ -5,10 +5,14 @@
       <h1>运营管理后台</h1>
       <p class="subtitle">查看运营概览、充电桩实时状态、等待队列，并支持标记故障与恢复。</p>
       <div class="hero-actions">
+        <div class="admin-chip">
+          <span class="admin-name">{{ adminName }}</span>
+          <span class="admin-role">已登录管理员</span>
+        </div>
         <button :disabled="loading" @click="refreshAll">
           {{ loading ? '刷新中...' : '刷新全部' }}
         </button>
-        <RouterLink class="nav-link" to="/">返回控制台</RouterLink>
+        <button type="button" class="nav-link action-link" @click="logout">退出登录</button>
       </div>
     </header>
 
@@ -125,7 +129,6 @@
 </template>
 
 <script>
-import { RouterLink } from 'vue-router';
 import {
   getAdminDashboard,
   getAdminPiles,
@@ -135,10 +138,11 @@ import {
 } from '../api';
 import { getStatusDesc } from '../api/enums';
 import QueueList from '../components/QueueList.vue';
+import { authState, clearSession } from '../session';
 
 export default {
   name: 'Admin',
-  components: { RouterLink, QueueList },
+  components: { QueueList },
   data() {
     return {
       dashboard: null,
@@ -152,6 +156,11 @@ export default {
   },
   mounted() {
     this.refreshAll();
+  },
+  computed: {
+    adminName() {
+      return authState.session.username || 'admin';
+    }
   },
   methods: {
     getStatusDesc,
@@ -215,6 +224,10 @@ export default {
       } finally {
         this.actionPileId = null;
       }
+    },
+    logout() {
+      clearSession();
+      this.$router.push('/');
     }
   }
 };
@@ -261,8 +274,28 @@ export default {
 .hero-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 12px;
   margin-top: 24px;
+}
+
+.admin-chip {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.8);
+  color: #172033;
+}
+
+.admin-name {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.admin-role {
+  font-size: 12px;
+  color: #667186;
 }
 
 button,
@@ -295,6 +328,10 @@ button:not(:disabled):hover,
   align-items: center;
   padding: 10px 18px;
   text-decoration: none;
+}
+
+.action-link {
+  justify-content: center;
 }
 
 .btn-danger {

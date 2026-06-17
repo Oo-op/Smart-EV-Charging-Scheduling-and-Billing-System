@@ -132,15 +132,9 @@
             </dl>
 
             <div class="order-actions">
-              <button
-                v-if="activeRequest.status === 'WAITING'"
-                type="button"
-                class="btn-secondary"
-                :disabled="loading.dispatch"
-                @click="handleDispatch"
-              >
-                {{ loading.dispatch ? '分配中…' : '分配充电桩' }}
-              </button>
+              <p v-if="activeRequest.status === 'WAITING'" class="muted inline-tip">
+                系统会在有空闲桩位时自动尝试分配，无需手动操作。
+              </p>
               <button
                 v-if="canStartSession"
                 type="button"
@@ -445,8 +439,7 @@ import {
 } from '../api';
 import { getStatusDesc } from '../api/enums';
 import QueueList from '../components/QueueList.vue';
-
-const STORAGE_KEY = 'charging_user_session';
+import { authState, clearSession, setSession } from '../session';
 
 export default {
   name: 'UserPortal',
@@ -455,7 +448,7 @@ export default {
     return {
       authTab: 'login',
       pageTab: 'charge',
-      session: { userId: null, username: '', token: '' },
+      session: { userId: null, username: '', token: '', role: '' },
       registerForm: { username: '', password: '', phone: '' },
       loginForm: { username: '', password: '' },
       vehicleForm: { plateNumber: '', model: '', batteryCapacity: 60 },
@@ -602,28 +595,22 @@ export default {
       this.messageType = type;
     },
     saveSession() {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.session));
+      setSession(this.session);
     },
     restoreSession() {
-      try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) return;
-        const saved = JSON.parse(raw);
-        if (saved.userId) {
-          this.session = saved;
-          this.loginForm.username = saved.username || '';
-          this.loadVehicles();
-          this.loadBills();
-          this.loadOrders();
-          this.loadQueue();
-        }
-      } catch {
-        localStorage.removeItem(STORAGE_KEY);
+      const saved = authState.session;
+      if (saved.userId) {
+        this.session = { ...saved };
+        this.loginForm.username = saved.username || '';
+        this.loadVehicles();
+        this.loadBills();
+        this.loadOrders();
+        this.loadQueue();
       }
     },
     logout() {
-      this.session = { userId: null, username: '', token: '' };
-      localStorage.removeItem(STORAGE_KEY);
+      this.session = { userId: null, username: '', token: '', role: '' };
+      clearSession();
       this.vehicles = [];
       this.selectedVehicleId = null;
       this.activeRequest = null;
@@ -651,8 +638,13 @@ export default {
       this.loading.login = true;
       try {
         const res = await loginUser(this.loginForm);
-        this.session = { userId: res.userId, username: res.username, token: res.token };
+        this.session = { userId: res.userId, username: res.username, token: res.token, role: res.role };
         this.saveSession();
+        if (res.role === 'ADMIN') {
+          this.notify('管理员账号已跳转到后台', 'info');
+          this.$router.push('/admin');
+          return;
+        }
         this.notify(`欢迎回来，${res.username}`, 'success');
         await this.loadVehicles();
         await this.loadBills();
@@ -711,7 +703,22 @@ export default {
         this.stopResult = null;
         await this.loadQueue();
         await this.loadOrders();
-        this.notify('预约已提交，请等待分配充电桩', 'success');
+        let autoAssigned = false;
+        try {
+          this.dispatchResult = await dispatchScheduler({ mode: this.requestForm.mode });
+          autoAssigned = true;
+          await this.refreshActiveRequest();
+          await this.loadQueue();
+          await this.loadOrders();
+        } catch {
+          autoAssigned = false;
+        }
+        this.notify(
+          autoAssigned
+            ? `预约成功，系统已自动分配 ${this.dispatchResult.pileCode} 号充电桩`
+            : '预约已提交，当前暂无空闲桩位，已进入等待队列',
+          'success'
+        );
       } catch (err) {
         this.notify(err.message || '提交失败', 'error');
       } finally {
@@ -1102,6 +1109,10 @@ export default {
 .banner.success { background: rgba(30, 107, 58, 0.1); color: #1e6b3a; }
 .banner.error { background: rgba(188, 59, 47, 0.1); color: #bc3b2f; }
 .banner.info { background: rgba(45, 93, 183, 0.1); color: #2d5db7; }
+
+.inline-tip {
+  margin: 0;
+}
 
 .layout-main {
   display: grid;

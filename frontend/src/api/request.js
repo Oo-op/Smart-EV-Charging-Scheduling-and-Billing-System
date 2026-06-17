@@ -1,8 +1,18 @@
 import axios from 'axios';
+import { getSession } from '../session';
 
 const request = axios.create({
   baseURL: '/api',
   timeout: 10000
+});
+
+request.interceptors.request.use((config) => {
+  const session = getSession();
+  if (session?.token) {
+    config.headers = config.headers || {};
+    config.headers.Authorization = `Bearer ${session.token}`;
+  }
+  return config;
 });
 
 /**

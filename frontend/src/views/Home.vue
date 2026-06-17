@@ -1,150 +1,224 @@
 <template>
   <div class="home">
-    <header class="hero">
-      <p class="eyebrow">Smart Charging System</p>
-      <h1>智能充电系统基础控制台</h1>
-      <p class="subtitle">用于验证后端健康状态、初始化演示数据，并快速查看当前已经接通的核心能力。</p>
-    </header>
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">Urban EV Charging Platform</p>
+        <h1>把充电预约、排队调度、账单支付整合成一套真正可用的网页系统</h1>
+        <p class="subtitle">
+          用户侧完成注册、绑车、预约和支付；管理员侧查看运营数据、处理故障与队列。系统启动后会自动准备基础站点、充电桩、电价和管理员账号。
+        </p>
+        <div class="hero-actions">
+          <button type="button" class="primary" @click="openRole('user-login')">用户登录</button>
+          <button type="button" class="secondary" @click="openRole('register')">立即注册</button>
+          <button type="button" class="ghost" @click="openRole('admin-login')">管理员登录</button>
+        </div>
+        <dl class="hero-metrics">
+          <div>
+            <dt>服务状态</dt>
+            <dd :class="{ error: healthError }">{{ healthLabel }}</dd>
+          </div>
+          <div>
+            <dt>默认管理账号</dt>
+            <dd>`admin / admin123456`</dd>
+          </div>
+          <div>
+            <dt>可用路由</dt>
+            <dd>用户端 / 管理后台 / 站点总览</dd>
+          </div>
+        </dl>
+      </div>
 
-    <section class="panel-grid">
-      <article class="panel">
-        <div class="panel-head">
-          <h2>服务状态</h2>
-          <button :disabled="healthLoading" @click="loadHealth">
-            {{ healthLoading ? '检查中...' : '检查健康状态' }}
+      <aside class="auth-card">
+        <div class="auth-tabs">
+          <button type="button" :class="{ active: authMode === 'user-login' }" @click="authMode = 'user-login'">用户登录</button>
+          <button type="button" :class="{ active: authMode === 'register' }" @click="authMode = 'register'">用户注册</button>
+          <button type="button" :class="{ active: authMode === 'admin-login' }" @click="authMode = 'admin-login'">管理员</button>
+        </div>
+
+        <p v-if="message" class="message" :class="messageType">{{ message }}</p>
+
+        <form v-if="authMode === 'register'" class="auth-form" @submit.prevent="handleRegister">
+          <label>
+            <span>用户名</span>
+            <input v-model="registerForm.username" placeholder="例如 zhangsan" required />
+          </label>
+          <label>
+            <span>密码</span>
+            <input v-model="registerForm.password" type="password" placeholder="至少 6 位" required />
+          </label>
+          <label>
+            <span>手机号</span>
+            <input v-model="registerForm.phone" placeholder="用于接收充电通知" required />
+          </label>
+          <button type="submit" class="primary wide" :disabled="loading.register">
+            {{ loading.register ? '注册中...' : '创建用户账号' }}
           </button>
+        </form>
+
+        <form v-else class="auth-form" @submit.prevent="handleLogin">
+          <label>
+            <span>{{ authMode === 'admin-login' ? '管理员账号' : '用户名' }}</span>
+            <input v-model="loginForm.username" :placeholder="authMode === 'admin-login' ? '默认 admin' : '请输入用户名'" required />
+          </label>
+          <label>
+            <span>密码</span>
+            <input v-model="loginForm.password" type="password" :placeholder="authMode === 'admin-login' ? '默认 admin123456' : '请输入密码'" required />
+          </label>
+          <button type="submit" class="primary wide" :disabled="loading.login">
+            {{ loading.login ? '登录中...' : authMode === 'admin-login' ? '登录管理后台' : '登录用户端' }}
+          </button>
+        </form>
+
+        <div class="auth-note">
+          <template v-if="authMode === 'admin-login'">
+            <strong>管理员演示账号</strong>
+            <span>系统已自动创建默认管理员，可直接登录进入后台。</span>
+          </template>
+          <template v-else>
+            <strong>首次使用</strong>
+            <span>用户只需要注册一次，之后系统会记住当前登录态。</span>
+          </template>
         </div>
-        <p v-if="healthError" class="error">{{ healthError }}</p>
-        <div v-else-if="health" class="kv">
-          <span>状态</span>
-          <strong>{{ health.status }}</strong>
-          <span>服务</span>
-          <strong>{{ health.service }}</strong>
-        </div>
-        <p v-else class="muted">点击按钮后会请求 `GET /api/health`。</p>
+      </aside>
+    </section>
+
+    <section class="feature-grid">
+      <article class="feature-card">
+        <p class="feature-kicker">用户体验</p>
+        <h2>少点运维按钮，多做业务动作</h2>
+        <p>不再要求用户先健康检查、手动初始化、再分配桩位。系统启动即具备基础运行环境，用户直接进入核心流程。</p>
       </article>
-
-      <article class="panel">
-        <div class="panel-head">
-          <h2>演示数据</h2>
-          <button :disabled="initLoading" @click="runInit">
-            {{ initLoading ? '初始化中...' : '初始化系统' }}
-          </button>
-        </div>
-        <p v-if="initError" class="error">{{ initError }}</p>
-        <div v-else-if="initResult" class="kv">
-          <span>充电站</span>
-          <strong>{{ initResult.stations }}</strong>
-          <span>充电桩</span>
-          <strong>{{ initResult.piles }}</strong>
-          <span>电价配置</span>
-          <strong>{{ initResult.prices }}</strong>
-        </div>
-        <p v-else class="muted">会调用 `POST /api/init` 生成一套最小演示数据。</p>
+      <article class="feature-card">
+        <p class="feature-kicker">运营后台</p>
+        <h2>管理员必须登录后才能看数据</h2>
+        <p>后台路由和管理接口都挂在登录态之下，避免把运营数据和桩控操作裸露在公开页面。</p>
       </article>
-
-      <article class="panel">
-        <div class="panel-head">
-          <h2>电价策略</h2>
-          <button :disabled="priceLoading" @click="loadPrices">
-            {{ priceLoading ? '加载中...' : '加载电价' }}
-          </button>
-        </div>
-        <p v-if="priceError" class="error">{{ priceError }}</p>
-        <ul v-else-if="prices.length" class="price-list">
-          <li v-for="price in prices" :key="`${price.period}-${price.mode}`">
+      <article class="feature-card">
+        <p class="feature-kicker">透明价格</p>
+        <h2>分时电价直接可见</h2>
+        <ul class="price-list">
+          <li v-for="price in pricePreview" :key="`${price.period}-${price.mode}`">
             <strong>{{ price.period }} / {{ price.mode }}</strong>
             <span>电费 {{ price.chargingFee }} + 服务费 {{ price.serviceFee }}</span>
           </li>
         </ul>
-        <p v-else class="muted">点击按钮后会请求 `GET /api/fees/prices`。</p>
       </article>
     </section>
 
-    <section class="roadmap">
-      <div>
-        <h2>当前已接通</h2>
-        <ul>
-          <li>统一响应包装与全局异常处理</li>
-          <li>健康检查、系统初始化、充电站查询、枚举查询</li>
-          <li>分时计费能力和完整 Axios API 封装</li>
-          <li>用户端主流程页面（注册→充电→账单→支付）</li>
-          <li>管理端 Dashboard（运营概览、桩监控、队列、故障处理）</li>
-        </ul>
+    <section class="journey">
+      <div class="journey-card">
+        <h3>用户流程</h3>
+        <ol>
+          <li>注册并登录账号</li>
+          <li>绑定车辆后直接预约</li>
+          <li>系统自动尝试分配空闲桩位</li>
+          <li>完成充电后自动生成账单并支付</li>
+        </ol>
       </div>
-      <div>
-        <h2>快速入口</h2>
-        <ul>
-          <li><RouterLink to="/user">用户端</RouterLink> — 完整充电业务演示</li>
-          <li><RouterLink to="/admin">管理端</RouterLink> — 运营监控与故障处理</li>
-          <li><RouterLink to="/stations">充电站</RouterLink> — 站点列表</li>
-        </ul>
+      <div class="journey-card">
+        <h3>管理流程</h3>
+        <ol>
+          <li>管理员登录后台</li>
+          <li>查看今日收入、活动会话和排队情况</li>
+          <li>处理故障桩与恢复调度</li>
+          <li>持续观察站点运行状态</li>
+        </ol>
       </div>
     </section>
-
-    <div class="link-row">
-      <RouterLink class="stations-link" to="/user">进入用户端</RouterLink>
-      <RouterLink class="stations-link" to="/admin">进入管理后台</RouterLink>
-      <RouterLink class="stations-link" to="/stations">查看充电站列表</RouterLink>
-    </div>
   </div>
 </template>
 
 <script>
-import { RouterLink } from 'vue-router';
-import { getHealth, getPrices, initSystem } from '../api';
+import { getHealth, getPrices, loginUser, registerUser } from '../api';
+import { authState, setSession } from '../session';
 
 export default {
   name: 'Home',
-  components: { RouterLink },
   data() {
     return {
-      health: null,
+      authMode: 'user-login',
+      loginForm: { username: '', password: '' },
+      registerForm: { username: '', password: '', phone: '' },
+      loading: { login: false, register: false },
+      pricePreview: [],
+      healthText: '',
       healthError: '',
-      healthLoading: false,
-      initResult: null,
-      initError: '',
-      initLoading: false,
-      prices: [],
-      priceError: '',
-      priceLoading: false
+      message: '',
+      messageType: 'info'
     };
   },
+  computed: {
+    healthLabel() {
+      if (this.healthError) return this.healthError;
+      return this.healthText || '检测中...';
+    }
+  },
   mounted() {
-    this.loadHealth();
+    this.fetchOverview();
+    const redirect = this.$route.query.redirect;
+    if (authState.session.userId && !redirect) {
+      this.redirectByRole(authState.session.role);
+    }
   },
   methods: {
-    async loadHealth() {
-      this.healthLoading = true;
-      this.healthError = '';
-      try {
-        this.health = await getHealth();
-      } catch (error) {
-        this.healthError = error.message || '健康检查失败';
-      } finally {
-        this.healthLoading = false;
+    openRole(mode) {
+      this.authMode = mode;
+      if (mode === 'admin-login') {
+        this.loginForm.username ||= 'admin';
+        this.loginForm.password ||= 'admin123456';
       }
     },
-    async runInit() {
-      this.initLoading = true;
-      this.initError = '';
+    notify(text, type = 'info') {
+      this.message = text;
+      this.messageType = type;
+    },
+    async fetchOverview() {
       try {
-        this.initResult = await initSystem();
+        const [health, prices] = await Promise.all([getHealth(), getPrices()]);
+        this.healthText = health.status === 'UP' ? '运行中' : health.status;
+        this.pricePreview = prices.slice(0, 4);
       } catch (error) {
-        this.initError = error.message || '初始化失败';
-      } finally {
-        this.initLoading = false;
+        this.healthError = error.message || '后端未启动';
       }
     },
-    async loadPrices() {
-      this.priceLoading = true;
-      this.priceError = '';
+    redirectByRole(role) {
+      const redirect = this.$route.query.redirect;
+      if (redirect) {
+        this.$router.push(String(redirect));
+        return;
+      }
+      this.$router.push(role === 'ADMIN' ? '/admin' : '/user');
+    },
+    async handleRegister() {
+      this.loading.register = true;
       try {
-        this.prices = await getPrices();
+        await registerUser(this.registerForm);
+        this.notify('注册成功，请直接登录开始使用', 'success');
+        this.loginForm.username = this.registerForm.username;
+        this.loginForm.password = this.registerForm.password;
+        this.authMode = 'user-login';
       } catch (error) {
-        this.priceError = error.message || '加载电价失败';
+        this.notify(error.message || '注册失败', 'error');
       } finally {
-        this.priceLoading = false;
+        this.loading.register = false;
+      }
+    },
+    async handleLogin() {
+      this.loading.login = true;
+      try {
+        const result = await loginUser(this.loginForm);
+        if (this.authMode === 'admin-login' && result.role !== 'ADMIN') {
+          throw new Error('当前账号不是管理员');
+        }
+        if (this.authMode !== 'admin-login' && result.role === 'ADMIN') {
+          this.notify('该账号是管理员，已为你跳转到后台', 'info');
+        }
+        setSession(result);
+        this.redirectByRole(result.role);
+      } catch (error) {
+        this.notify(error.message || '登录失败', 'error');
+      } finally {
+        this.loading.login = false;
       }
     }
   }
@@ -153,150 +227,302 @@ export default {
 
 <style scoped>
 .home {
-  min-height: 100vh;
-  padding: 48px 24px 64px;
+  min-height: calc(100vh - 64px);
+  padding: 42px 24px 72px;
   color: #172033;
   background:
-    radial-gradient(circle at top left, rgba(255, 212, 163, 0.55), transparent 28%),
-    linear-gradient(180deg, #f8f5ef 0%, #edf3fb 100%);
+    radial-gradient(circle at top left, rgba(255, 196, 120, 0.24), transparent 28%),
+    radial-gradient(circle at top right, rgba(87, 132, 255, 0.18), transparent 24%),
+    linear-gradient(180deg, #f7f5ef 0%, #eef4fb 100%);
 }
+
 .hero,
-.roadmap,
-.panel-grid,
-.stations-link {
-  max-width: 1120px;
+.feature-grid,
+.journey {
+  max-width: 1180px;
   margin: 0 auto;
 }
-.eyebrow {
+
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) 380px;
+  gap: 28px;
+  align-items: start;
+}
+
+.eyebrow,
+.feature-kicker {
   margin: 0 0 12px;
   font-size: 12px;
-  letter-spacing: 0.24em;
+  letter-spacing: 0.22em;
   text-transform: uppercase;
-  color: #b75d2d;
+  color: #a05c1a;
 }
+
 .hero h1 {
   margin: 0;
-  font-size: clamp(32px, 5vw, 56px);
-  line-height: 1.05;
-}
-.subtitle {
+  font-size: clamp(36px, 5vw, 62px);
+  line-height: 1.06;
   max-width: 760px;
-  margin: 16px 0 0;
+}
+
+.subtitle {
+  margin: 20px 0 0;
+  max-width: 720px;
   font-size: 18px;
-  line-height: 1.7;
-  color: #4a5670;
+  line-height: 1.8;
+  color: #49566f;
 }
-.panel-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 20px;
-  margin-top: 36px;
-}
-.panel {
-  padding: 24px;
-  border: 1px solid rgba(23, 32, 51, 0.08);
-  border-radius: 24px;
-  background: rgba(255, 255, 255, 0.82);
-  box-shadow: 0 18px 60px rgba(31, 44, 71, 0.08);
-  backdrop-filter: blur(8px);
-}
-.panel-head {
+
+.hero-actions {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 28px;
 }
-.panel-head h2,
-.roadmap h2 {
-  margin: 0;
-  font-size: 20px;
-}
-button,
-.stations-link {
+
+button {
   border: none;
+  cursor: pointer;
+}
+
+.primary,
+.secondary,
+.ghost {
+  padding: 12px 18px;
   border-radius: 999px;
+  font-size: 14px;
+  transition: transform 0.18s ease, opacity 0.18s ease;
+}
+
+.primary {
   background: #172033;
   color: #fff;
-  cursor: pointer;
-  transition: transform 0.2s ease, opacity 0.2s ease;
 }
-button {
-  padding: 10px 16px;
-  font-size: 14px;
+
+.secondary {
+  background: #e6edf8;
+  color: #172033;
 }
-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.65;
+
+.ghost {
+  background: transparent;
+  border: 1px solid rgba(23, 32, 51, 0.12);
+  color: #172033;
 }
-button:not(:disabled):hover,
-.stations-link:hover {
+
+.primary:hover,
+.secondary:hover,
+.ghost:hover {
   transform: translateY(-1px);
 }
-.kv {
+
+.hero-metrics {
   display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 10px 18px;
-  margin-top: 20px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 34px 0 0;
 }
-.kv span {
-  color: #69748b;
+
+.hero-metrics div {
+  padding: 18px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 10px 30px rgba(32, 49, 78, 0.06);
 }
-.muted {
-  margin-top: 20px;
-  color: #69748b;
-  line-height: 1.6;
+
+.hero-metrics dt {
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: #6a7489;
 }
-.error {
-  margin-top: 20px;
+
+.hero-metrics dd {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.hero-metrics dd.error {
   color: #bc3b2f;
 }
-.price-list,
-.roadmap ul {
+
+.auth-card,
+.feature-card,
+.journey-card {
+  border: 1px solid rgba(23, 32, 51, 0.08);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.84);
+  box-shadow: 0 20px 60px rgba(24, 36, 58, 0.08);
+  backdrop-filter: blur(12px);
+}
+
+.auth-card {
+  padding: 22px;
+}
+
+.auth-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  padding: 6px;
+  border-radius: 16px;
+  background: #eef2f7;
+}
+
+.auth-tabs button {
+  padding: 10px 0;
+  border-radius: 12px;
+  background: transparent;
+  color: #647187;
+}
+
+.auth-tabs button.active {
+  background: #fff;
+  color: #172033;
+  font-weight: 600;
+}
+
+.message {
+  margin: 16px 0 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  font-size: 14px;
+}
+
+.message.success {
+  background: rgba(30, 107, 58, 0.1);
+  color: #1e6b3a;
+}
+
+.message.error {
+  background: rgba(188, 59, 47, 0.1);
+  color: #bc3b2f;
+}
+
+.message.info {
+  background: rgba(45, 93, 183, 0.1);
+  color: #2d5db7;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.auth-form label span {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+  color: #67748a;
+}
+
+.auth-form input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid rgba(23, 32, 51, 0.12);
+  border-radius: 14px;
+  font-size: 15px;
+}
+
+.wide {
+  width: 100%;
+}
+
+.auth-note {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(23, 32, 51, 0.08);
+  font-size: 13px;
+  color: #657189;
+}
+
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 28px;
+}
+
+.feature-card {
+  padding: 24px;
+}
+
+.feature-card h2 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.3;
+}
+
+.feature-card p,
+.feature-card li,
+.journey-card li {
+  color: #566377;
+  line-height: 1.7;
+}
+
+.price-list {
   padding: 0;
-  margin: 20px 0 0;
+  margin: 18px 0 0;
   list-style: none;
 }
-.price-list li,
-.roadmap li {
-  margin-bottom: 12px;
-  line-height: 1.6;
+
+.price-list li + li {
+  margin-top: 12px;
 }
+
 .price-list strong {
   display: block;
   margin-bottom: 4px;
+  color: #172033;
 }
-.roadmap {
+
+.journey {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 20px;
-  margin-top: 24px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 18px;
 }
-.roadmap > div {
+
+.journey-card {
   padding: 24px;
-  border-radius: 24px;
-  background: rgba(255, 255, 255, 0.72);
 }
-.roadmap li a {
-  color: #2d5db7;
+
+.journey-card h3 {
+  margin: 0 0 14px;
+  font-size: 20px;
 }
-.link-row {
-  max-width: 1120px;
-  margin: 28px auto 0;
+
+.journey-card ol {
+  margin: 0;
+  padding-left: 20px;
 }
-.stations-link {
-  display: inline-flex;
-  margin-top: 0;
-  margin-right: 12px;
-  padding: 14px 20px;
-  text-decoration: none;
-}
-@media (max-width: 720px) {
-  .home {
-    padding: 32px 16px 48px;
+
+@media (max-width: 960px) {
+  .hero,
+  .feature-grid,
+  .journey {
+    grid-template-columns: 1fr;
   }
-  .panel-head {
+  .hero-metrics {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .home {
+    padding: 28px 16px 48px;
+  }
+  .hero-actions {
     flex-direction: column;
-    align-items: flex-start;
+  }
+  .auth-tabs {
+    grid-template-columns: 1fr;
   }
 }
 </style>

@@ -4,7 +4,7 @@ import com.example.charging.dto.ChargingRequestDetailDTO;
 import com.example.charging.dto.LoginRequest;
 import com.example.charging.dto.LoginResponse;
 import com.example.charging.dto.RegisterRequest;
-import com.example.charging.entity.User;
+import com.example.charging.dto.UserProfileDTO;
 import com.example.charging.service.ChargingRequestService;
 import com.example.charging.service.UserService;
 import org.springframework.web.bind.annotation.*;
@@ -24,7 +24,7 @@ public class UserController {
     }
 
     @PostMapping("/register")
-    public User register(@RequestBody RegisterRequest request) {
+    public UserProfileDTO register(@RequestBody RegisterRequest request) {
         return userService.register(request);
     }
 

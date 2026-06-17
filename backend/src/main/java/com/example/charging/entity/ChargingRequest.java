@@ -17,10 +17,10 @@ import java.time.LocalDateTime;
 @Data
 @Entity
 @Table(name = "charging_request", indexes = {
-        @Index(name = "idx_user", columnList = "user_id"),
-        @Index(name = "idx_vehicle", columnList = "vehicle_id"),
-        @Index(name = "idx_mode_status", columnList = "mode, status"),
-        @Index(name = "idx_created", columnList = "created_at")
+        @Index(name = "idx_request_user", columnList = "user_id"),
+        @Index(name = "idx_request_vehicle", columnList = "vehicle_id"),
+        @Index(name = "idx_request_mode_status", columnList = "mode, status"),
+        @Index(name = "idx_request_created", columnList = "created_at")
 })
 public class ChargingRequest {
 
