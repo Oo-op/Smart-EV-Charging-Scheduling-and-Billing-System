@@ -53,9 +53,8 @@
     <section class="panel">
       <div class="panel-head">
         <h2>充电桩监控</h2>
-        <span class="muted">GET /api/admin/piles</span>
       </div>
-      <div v-if="!piles.length" class="muted empty">暂无充电桩数据，请先在控制台初始化系统。</div>
+      <div v-if="!piles.length" class="muted empty">暂无充电桩数据</div>
       <div v-else class="table-wrap">
         <table>
           <thead>

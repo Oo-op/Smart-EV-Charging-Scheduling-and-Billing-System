@@ -12,20 +12,7 @@
           <button type="button" class="secondary" @click="openRole('register')">立即注册</button>
           <button type="button" class="ghost" @click="openRole('admin-login')">管理员登录</button>
         </div>
-        <dl class="hero-metrics">
-          <div>
-            <dt>服务状态</dt>
-            <dd :class="{ error: healthError }">{{ healthLabel }}</dd>
-          </div>
-          <div>
-            <dt>默认管理账号</dt>
-            <dd>`admin / admin123456`</dd>
-          </div>
-          <div>
-            <dt>可用路由</dt>
-            <dd>用户端 / 管理后台 / 站点总览</dd>
-          </div>
-        </dl>
+
       </div>
 
       <aside class="auth-card">
@@ -84,21 +71,21 @@
 
     <section class="feature-grid">
       <article class="feature-card">
-        <p class="feature-kicker">用户体验</p>
-        <h2>少点运维按钮，多做业务动作</h2>
-        <p>不再要求用户先健康检查、手动初始化、再分配桩位。系统启动即具备基础运行环境，用户直接进入核心流程。</p>
+        <p class="feature-kicker">便捷体验</p>
+        <h2>一键预约，即刻充电</h2>
+        <p>无需繁琐步骤，注册绑车后即可直接预约充电，系统自动分配最优桩位。</p>
       </article>
       <article class="feature-card">
-        <p class="feature-kicker">运营后台</p>
-        <h2>管理员必须登录后才能看数据</h2>
-        <p>后台路由和管理接口都挂在登录态之下，避免把运营数据和桩控操作裸露在公开页面。</p>
+        <p class="feature-kicker">安全保障</p>
+        <h2>数据加密，隐私保护</h2>
+        <p>管理员权限严格管控，所有操作记录可追溯，确保运营数据安全。</p>
       </article>
       <article class="feature-card">
-        <p class="feature-kicker">透明价格</p>
-        <h2>分时电价直接可见</h2>
+        <p class="feature-kicker">透明消费</p>
+        <h2>分时电价一目了然</h2>
         <ul class="price-list">
           <li v-for="price in pricePreview" :key="`${price.period}-${price.mode}`">
-            <strong>{{ price.period }} / {{ price.mode }}</strong>
+            <strong>{{ price.period }} / {{ getModeDesc(price.mode) }}</strong>
             <span>电费 {{ price.chargingFee }} + 服务费 {{ price.serviceFee }}</span>
           </li>
         </ul>
@@ -129,7 +116,7 @@
 </template>
 
 <script>
-import { getHealth, getPrices, loginUser, registerUser } from '../api';
+import { getPrices, loginUser, registerUser } from '../api';
 import { authState, setSession } from '../session';
 
 export default {
@@ -141,26 +128,21 @@ export default {
       registerForm: { username: '', password: '', phone: '' },
       loading: { login: false, register: false },
       pricePreview: [],
-      healthText: '',
-      healthError: '',
       message: '',
       messageType: 'info'
     };
   },
-  computed: {
-    healthLabel() {
-      if (this.healthError) return this.healthError;
-      return this.healthText || '检测中...';
-    }
-  },
   mounted() {
-    this.fetchOverview();
+    this.fetchPrices();
     const redirect = this.$route.query.redirect;
     if (authState.session.userId && !redirect) {
       this.redirectByRole(authState.session.role);
     }
   },
   methods: {
+    getModeDesc(mode) {
+      return mode === 'FAST' ? '快充' : '慢充';
+    },
     openRole(mode) {
       this.authMode = mode;
       if (mode === 'admin-login') {
@@ -172,13 +154,12 @@ export default {
       this.message = text;
       this.messageType = type;
     },
-    async fetchOverview() {
+    async fetchPrices() {
       try {
-        const [health, prices] = await Promise.all([getHealth(), getPrices()]);
-        this.healthText = health.status === 'UP' ? '运行中' : health.status;
+        const prices = await getPrices();
         this.pricePreview = prices.slice(0, 4);
       } catch (error) {
-        this.healthError = error.message || '后端未启动';
+        console.error('加载电价失败:', error);
       }
     },
     redirectByRole(role) {

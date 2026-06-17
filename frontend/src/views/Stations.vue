@@ -12,7 +12,7 @@
 
     <p v-if="error" class="error">{{ error }}</p>
     <p v-else-if="!stations.length && !loading" class="empty">
-      暂无站点数据。先回到首页执行一次系统初始化。
+      暂无充电站数据，系统正在准备中...
     </p>
 
     <div v-else class="list">
