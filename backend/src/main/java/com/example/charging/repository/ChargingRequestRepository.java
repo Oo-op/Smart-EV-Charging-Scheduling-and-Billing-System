@@ -4,6 +4,7 @@ import java.util.Optional;
 import com.example.charging.entity.ChargingRequest;
 import com.example.charging.enums.ChargeMode;
 import com.example.charging.enums.ChargingRequestStatus;
+import com.example.charging.enums.QueueArea;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
@@ -22,6 +23,14 @@ public interface ChargingRequestRepository extends JpaRepository<ChargingRequest
     List<ChargingRequest> findByModeAndStatusInOrderByCreatedAtAsc(ChargeMode mode, List<ChargingRequestStatus> statuses);
 
     List<ChargingRequest> findByStatus(ChargingRequestStatus status);
+
+    List<ChargingRequest> findByModeAndStatusAndQueueAreaOrderByCreatedAtAsc(
+            ChargeMode mode, ChargingRequestStatus status, QueueArea queueArea);
+
+    List<ChargingRequest> findByAssignedPileIdAndStatusInOrderByQueueNumberAscCreatedAtAsc(
+            Long assignedPileId, List<ChargingRequestStatus> statuses);
+
+    long countByQueueArea(QueueArea queueArea);
 
     // 在 ChargingRequestRepository 接口中添加以下方法
 

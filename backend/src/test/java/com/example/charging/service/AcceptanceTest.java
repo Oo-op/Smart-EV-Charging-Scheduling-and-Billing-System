@@ -21,6 +21,8 @@ import java.time.LocalDateTime;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -88,8 +90,11 @@ class AcceptanceTest {
         initCoreTestData();
 
         // 2. Parse CSV
-        List<Checkpoint> checkpoints = parseCSV("/Users/kettenkrad/Documents/Smart-EV-Charging-Scheduling-and-Billing-System/tests/resources/作业验收用例_测试用例.csv");
+        Path csvPath = Paths.get("..", "tests", "resources", "作业验收用例_测试用例.csv")
+                .toAbsolutePath()
+                .normalize();
 
+        List<Checkpoint> checkpoints = parseCSV(csvPath.toString());
         // Initialize simulation time to the first checkpoint's time
         Checkpoint firstCp = checkpoints.get(0);
         currentSimTime = parseSimTime(firstCp.time);
@@ -114,6 +119,8 @@ class AcceptanceTest {
 
             // Step 3 & 4: Execute current event
             executeEvent(cp.event);
+            startAssignedSessionsFromDatabase();
+            syncMirrorFromDatabase();
 
             // Step 5 & 6: Get snapshot and compare
             String mismatch = verifyState(cp);
@@ -333,199 +340,84 @@ class AcceptanceTest {
                 stopReq.setChargedAmount(newSessionCharged);
                 stopReq.setMockEndTime(currentSimTime);
                 sessionService.stop(session.getId(), stopReq);
-
-                activeSessions.remove(pile.getCode());
-                promoteQueue(pile);
             }
         }
 
-        migrateWaitingRequests();
+        startAssignedSessionsFromDatabase();
+        syncMirrorFromDatabase();
     }
 
-    private void promoteQueue(ChargingPile pile) {
-        List<Long> queue = pileQueues.get(pile.getCode());
-        if (queue != null && !queue.isEmpty()) {
-            Long nextReqId = queue.remove(0);
-
-            // Set request status to ASSIGNED and assign pile before start
-            ChargingRequest request = requestRepository.findById(nextReqId).orElseThrow();
-            request.setStatus(ChargingRequestStatus.ASSIGNED);
-            request.setAssignedPileId(pile.getId());
-            requestRepository.save(request);
-
-            SessionDTO sessionDto = sessionService.start(nextReqId, pile.getId());
-            ChargingSession session = sessionRepository.findById(sessionDto.getSessionId()).orElseThrow();
-            session.setStartTime(currentSimTime);
-            sessionRepository.save(session);
-
-            activeSessions.put(pile.getCode(), session.getId());
-
-            pullFromWaitingAreaToQueue(pile.getMode());
-        }
-    }
-
-    private void pullFromWaitingAreaToQueue(ChargeMode mode) {
-        boolean pulled;
+    private void startAssignedSessionsFromDatabase() {
+        boolean started;
         do {
-            pulled = false;
-            for (int i = 0; i < waitingArea.size(); i++) {
-                ChargingRequest req = requestRepository.findById(waitingArea.get(i)).orElseThrow();
-                if (req.getMode() == mode) {
-                    Long reqId = waitingArea.get(i);
-                    if (tryAssignRequestToQueue(reqId, mode, true)) {
-                        waitingArea.remove(i);
-                        pulled = true;
-                        break;
-                    }
-                }
-            }
-        } while (pulled);
-    }
-
-    private boolean tryAssignRequestToQueue(Long reqId, ChargeMode mode, boolean forceAssign) {
-        List<ChargingPile> piles = pileRepository.findAll().stream()
-                .filter(p -> p.getMode() == mode && p.getStatus() != ChargingPileStatus.FAULT)
-                .toList();
-
-        if (piles.isEmpty()) {
-            return false;
-        }
-
-        ChargingPile bestPile = null;
-        BigDecimal minWaitTime = null;
-
-        int capacityLimit = chargingProperties.getQueue().getPileCapacity() - 1;
-
-        for (ChargingPile pile : piles) {
-            List<Long> queue = pileQueues.get(pile.getCode());
-            if (forceAssign && queue.size() >= capacityLimit) {
-                continue; // Skip full piles
-            }
-
-            BigDecimal waitTime = calculatePileWaitingTime(pile);
-            if (minWaitTime == null || waitTime.compareTo(minWaitTime) < 0 ||
-               (waitTime.compareTo(minWaitTime) == 0 && (bestPile == null || pile.getCode().compareTo(bestPile.getCode()) < 0))) {
-                minWaitTime = waitTime;
-                bestPile = pile;
-            }
-        }
-
-        if (bestPile != null) {
-            List<Long> queue = pileQueues.get(bestPile.getCode());
-            if (queue.size() < capacityLimit) {
-                queue.add(reqId);
-
-                ChargingRequest request = requestRepository.findById(reqId).orElseThrow();
-                request.setAssignedPileId(bestPile.getId());
-                request.setQueueNumber(queue.size());
-                requestRepository.save(request);
-
-                Long activeSessionId = activeSessions.get(bestPile.getCode());
-                if (activeSessionId == null) {
-                    queue.remove(reqId);
-
-                    request.setStatus(ChargingRequestStatus.ASSIGNED);
-                    requestRepository.save(request);
-
-                    SessionDTO sessionDto = sessionService.start(reqId, bestPile.getId());
-                    ChargingSession session = sessionRepository.findById(sessionDto.getSessionId()).orElseThrow();
-                    session.setStartTime(currentSimTime);
-                    sessionRepository.save(session);
-
-                    activeSessions.put(bestPile.getCode(), session.getId());
-                } else {
-                    request.setStatus(ChargingRequestStatus.WAITING);
-                    requestRepository.save(request);
-                }
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private void assignRequestToQueue(Long reqId, ChargeMode mode) {
-        if (!tryAssignRequestToQueue(reqId, mode, false)) {
-            int maxWaitingAreaCapacity = chargingProperties.getQueue().getWaitingAreaCapacity();
-            if (waitingArea.size() < maxWaitingAreaCapacity) {
-                waitingArea.add(reqId);
-                ChargingRequest request = requestRepository.findById(reqId).orElseThrow();
-                request.setStatus(ChargingRequestStatus.WAITING);
-                request.setAssignedPileId(null);
-                request.setQueueNumber(null);
-                requestRepository.save(request);
-            } else {
-                ChargingRequest request = requestRepository.findById(reqId).orElseThrow();
-                requestService.cancelRequest(reqId, request.getUserId());
-            }
-        }
-    }
-
-    private BigDecimal calculatePileWaitingTime(ChargingPile pile) {
-        BigDecimal totalWait = BigDecimal.ZERO;
-
-        Long sessionId = activeSessions.get(pile.getCode());
-        if (sessionId != null) {
-            ChargingSession session = sessionRepository.findById(sessionId).orElseThrow();
-            ChargingRequest request = requestRepository.findById(session.getRequestId()).orElseThrow();
-            BigDecimal remainingEnergy = request.getTargetAmount()
-                    .subtract(safe(request.getChargedAmount()))
-                    .subtract(safe(session.getChargedAmount()));
-            if (remainingEnergy.compareTo(BigDecimal.ZERO) > 0) {
-                totalWait = totalWait.add(remainingEnergy.divide(pile.getPower(), 8, RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(60)));
-            }
-        }
-
-        List<Long> queue = pileQueues.get(pile.getCode());
-        for (Long reqId : queue) {
-            ChargingRequest request = requestRepository.findById(reqId).orElseThrow();
-            BigDecimal energy = request.getTargetAmount().subtract(safe(request.getChargedAmount()));
-            totalWait = totalWait.add(energy.divide(pile.getPower(), 8, RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(60)));
-        }
-
-        return totalWait;
-    }
-
-    private void migrateWaitingRequests() {
-        List<ChargingRequest> recoveryRequests = requestRepository.findByStatus(ChargingRequestStatus.WAITING);
-        recoveryRequests.sort(Comparator.comparing(ChargingRequest::getCreatedAt));
-        for (ChargingRequest req : recoveryRequests) {
-            if (req.getQueueNumber() != null && req.getQueueNumber() == 0) {
-                if (isAlreadyQueued(req.getId())) {
+            started = false;
+            List<ChargingRequest> assignedRequests = requestRepository.findAll().stream()
+                    .filter(request -> request.getStatus() == ChargingRequestStatus.ASSIGNED)
+                    .filter(request -> request.getAssignedPileId() != null)
+                    .sorted(Comparator
+                            .comparing(ChargingRequest::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder()))
+                            .thenComparing(ChargingRequest::getId))
+                    .toList();
+            for (ChargingRequest request : assignedRequests) {
+                boolean alreadyCharging = sessionRepository
+                        .findFirstByRequestIdAndStatus(request.getId(), ChargingSessionStatus.CHARGING)
+                        .isPresent();
+                if (alreadyCharging) {
                     continue;
                 }
-                if (tryAssignRequestToQueue(req.getId(), req.getMode(), true)) {
-                    waitingArea.remove(req.getId());
+                ChargingPile pile = pileRepository.findById(request.getAssignedPileId()).orElseThrow();
+                if (pile.getStatus() == ChargingPileStatus.FAULT || pile.getStatus() == ChargingPileStatus.OFFLINE) {
+                    continue;
                 }
+                SessionDTO sessionDto = sessionService.start(request.getId(), pile.getId());
+                ChargingSession session = sessionRepository.findById(sessionDto.getSessionId()).orElseThrow();
+                session.setStartTime(currentSimTime);
+                sessionRepository.save(session);
+                started = true;
             }
-        }
-
-        List<ChargingPile> faultedPiles = pileRepository.findByStatus(ChargingPileStatus.FAULT);
-        for (ChargingPile pile : faultedPiles) {
-            List<Long> queue = pileQueues.get(pile.getCode());
-            if (queue != null && !queue.isEmpty()) {
-                Iterator<Long> it = queue.iterator();
-                while (it.hasNext()) {
-                    Long reqId = it.next();
-                    if (tryAssignRequestToQueue(reqId, pile.getMode(), true)) {
-                        it.remove();
-                    }
-                }
-            }
-        }
+        } while (started);
     }
 
-    private boolean isAlreadyQueued(Long reqId) {
-        if (waitingArea.contains(reqId)) return true;
-        for (List<Long> q : pileQueues.values()) {
-            if (q.contains(reqId)) return true;
+    private void syncMirrorFromDatabase() {
+        waitingArea.clear();
+        for (List<Long> queue : pileQueues.values()) {
+            queue.clear();
         }
-        for (Long sessionId : activeSessions.values()) {
-            ChargingSession s = sessionRepository.findById(sessionId).orElse(null);
-            if (s != null && s.getRequestId().equals(reqId)) {
-                return true;
-            }
-        }
-        return false;
+        activeSessions.clear();
+
+        sessionRepository.findAll().stream()
+                .filter(session -> session.getStatus() == ChargingSessionStatus.CHARGING)
+                .sorted(Comparator.comparing(ChargingSession::getStartTime, Comparator.nullsLast(Comparator.naturalOrder())))
+                .forEach(session -> {
+                    ChargingPile pile = pileRepository.findById(session.getPileId()).orElseThrow();
+                    activeSessions.put(pile.getCode(), session.getId());
+                });
+
+        requestRepository.findAll().stream()
+                .filter(request -> request.getStatus() == ChargingRequestStatus.WAITING)
+                .filter(request -> request.getQueueArea() == QueueArea.WAITING_AREA)
+                .sorted(Comparator
+                        .comparing(ChargingRequest::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder()))
+                        .thenComparing(ChargingRequest::getId))
+                .forEach(request -> waitingArea.add(request.getId()));
+
+        requestRepository.findAll().stream()
+                .filter(request -> request.getQueueArea() == QueueArea.PILE_QUEUE)
+                .filter(request -> request.getAssignedPileId() != null)
+                .filter(request -> request.getStatus() == ChargingRequestStatus.WAITING
+                        || request.getStatus() == ChargingRequestStatus.ASSIGNED)
+                .sorted(Comparator
+                        .comparing(ChargingRequest::getAssignedPileId, Comparator.nullsLast(Comparator.naturalOrder()))
+                        .thenComparing(ChargingRequest::getQueueNumber, Comparator.nullsLast(Comparator.naturalOrder()))
+                        .thenComparing(ChargingRequest::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder()))
+                        .thenComparing(ChargingRequest::getId))
+                .forEach(request -> {
+                    ChargingPile pile = pileRepository.findById(request.getAssignedPileId()).orElseThrow();
+                    List<Long> queue = pileQueues.get(pile.getCode());
+                    if (queue != null) {
+                        queue.add(request.getId());
+                    }
+                });
     }
 
     private BigDecimal safe(BigDecimal value) {
@@ -581,7 +473,6 @@ class AcceptanceTest {
             } else {
                 // Recovery
                 pileService.recover(pile.getId());
-                promoteQueue(pile);
             }
         } else if ("C".equals(type)) {
             // Modify target amount
@@ -632,8 +523,6 @@ class AcceptanceTest {
 
         ChargingRequestDetailDTO detail = requestService.submitRequest(req);
         vehicleToReqId.put(vName, detail.getRequestId());
-
-        assignRequestToQueue(detail.getRequestId(), mode);
     }
 
     private void handleCancel(String vName) {
@@ -670,26 +559,7 @@ class AcceptanceTest {
             stopReq.setChargedAmount(request.getChargedAmount());
             stopReq.setMockEndTime(currentSimTime);
             sessionService.stop(sessionId, stopReq);
-
-            ChargingPile pile = pileRepository.findByCode(targetPile).orElseThrow();
-            promoteQueue(pile);
         } else {
-            // In pile queue or Waiting Area
-            boolean removed = false;
-            for (Map.Entry<String, List<Long>> entry : pileQueues.entrySet()) {
-                List<Long> q = entry.getValue();
-                if (q.contains(reqId)) {
-                    q.remove(reqId);
-                    removed = true;
-                    pullFromWaitingAreaToQueue(pileRepository.findByCode(entry.getKey()).orElseThrow().getMode());
-                    break;
-                }
-            }
-
-            if (!removed) {
-                waitingArea.remove(reqId);
-            }
-
             if (request.getStatus() == ChargingRequestStatus.WAITING || request.getStatus() == ChargingRequestStatus.ASSIGNED) {
                 requestService.cancelRequest(reqId, userId);
             }

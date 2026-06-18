@@ -2,6 +2,7 @@ package com.example.charging.entity;
 
 import com.example.charging.enums.ChargeMode;
 import com.example.charging.enums.ChargingRequestStatus;
+import com.example.charging.enums.QueueArea;
 import jakarta.persistence.*;
 import lombok.Data;
 import org.hibernate.annotations.CreationTimestamp;
@@ -51,6 +52,10 @@ public class ChargingRequest {
 
     @Column(name = "queue_number")
     private Integer queueNumber;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "queue_area", length = 30)
+    private QueueArea queueArea;
 
     @Column(name = "assigned_pile_id")
     private Long assignedPileId;

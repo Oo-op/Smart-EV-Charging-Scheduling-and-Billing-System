@@ -42,7 +42,7 @@ public class ChargingProperties {
 
     @Data
     public static class QueueProperties {
-        private int pileCapacity = 3;
+        private int pileCapacity = 2;
         private int waitingAreaCapacity = 10;
     }
 }

@@ -17,15 +17,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
 public class PileService {
-
-    private static final String TEMP_FAULT_NOTE = "当前项目尚无 fault_report/maintenance_record 表；故障原因、恢复记录与硬件电表读数为接口层临时模拟信息。";
-    private static final String TEMP_PRIORITY_NOTE = "断点续充优先级临时复用 queueNumber=0 表示；等待正式队列/优先级字段后可替换。";
 
     private final ChargingPileRepository pileRepository;
     private final ChargingSessionRepository sessionRepository;
@@ -97,7 +93,7 @@ public class PileService {
     @Transactional
     public PileFaultResult markFault(Long pileId, String faultReason, BigDecimal chargedAmount) {
         ChargingPile pile = pileRepository.findById(pileId)
-                .orElseThrow(() -> new IllegalArgumentException("充电桩不存在"));
+                .orElseThrow(() -> new IllegalArgumentException("Charging pile not found"));
 
         PileFaultResult result = new PileFaultResult();
         if (pile.getStatus() == ChargingPileStatus.CHARGING) {
@@ -107,20 +103,25 @@ public class PileService {
         pile.setStatus(ChargingPileStatus.FAULT);
         pileRepository.save(pile);
 
+        if (result.getRecoveredRequestId() != null && result.getRequestStatus() == ChargingRequestStatus.WAITING) {
+            schedulerService.placeRecoveryRequest(result.getRecoveredRequestId());
+        }
+        schedulerService.migrateFaultedPileQueue(pile.getId());
+
         result.setPileId(pile.getId());
         result.setStatus(pile.getStatus());
         result.setFaultReason(faultReason);
-        result.setTemporarySimulation(true);
-        result.setTemporarySimulationNote(TEMP_FAULT_NOTE + " " + TEMP_PRIORITY_NOTE);
+        result.setTemporarySimulation(false);
+        result.setTemporarySimulationNote("Fault handling migrated active recovery request first, then original pile queue before waiting area.");
         return result;
     }
 
     @Transactional
     public PileRecoverResult recover(Long pileId) {
         ChargingPile pile = pileRepository.findById(pileId)
-                .orElseThrow(() -> new IllegalArgumentException("充电桩不存在"));
+                .orElseThrow(() -> new IllegalArgumentException("Charging pile not found"));
         if (pile.getStatus() != ChargingPileStatus.FAULT) {
-            throw new IllegalArgumentException("只有 FAULT 状态的充电桩可以恢复");
+            throw new IllegalArgumentException("Only FAULT piles can recover");
         }
 
         pile.setStatus(ChargingPileStatus.IDLE);
@@ -129,16 +130,9 @@ public class PileService {
         PileRecoverResult result = new PileRecoverResult();
         result.setPileId(pile.getId());
         result.setStatus(pile.getStatus());
-        result.setTemporarySimulation(true);
-        result.setTemporarySimulationNote(TEMP_FAULT_NOTE + " 恢复后会自动尝试使用 SJF 调度同类型等待请求。");
-        boolean hasWaitingRequest = !requestRepository
-                .findByModeAndStatusOrderByCreatedAtAsc(pile.getMode(), ChargingRequestStatus.WAITING)
-                .isEmpty();
-        if (hasWaitingRequest) {
-            result.setDispatchResult(schedulerService.dispatch(pile.getMode()));
-        } else {
-            result.setDispatchResult(null);
-        }
+        result.setTemporarySimulation(false);
+        result.setTemporarySimulationNote("Recovered pile promotes its own queue, then recovery/migration queues, then waiting area.");
+        result.setDispatchResult(schedulerService.promoteNextForPile(pile.getId()));
         return result;
     }
 
@@ -149,9 +143,9 @@ public class PileService {
                 .findByPileIdAndStatus(pile.getId(), ChargingSessionStatus.CHARGING)
                 .stream()
                 .findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("充电桩状态为 CHARGING，但未找到进行中的会话"));
+                .orElseThrow(() -> new IllegalArgumentException("Pile is CHARGING but no active session was found"));
         ChargingRequest request = requestRepository.findById(session.getRequestId())
-                .orElseThrow(() -> new IllegalArgumentException("充电请求不存在"));
+                .orElseThrow(() -> new IllegalArgumentException("Charging request not found"));
 
         BigDecimal sessionCharged = chargedAmount == null ? safe(session.getChargedAmount()) : safe(chargedAmount);
         BigDecimal totalCharged = safe(request.getChargedAmount()).add(sessionCharged);

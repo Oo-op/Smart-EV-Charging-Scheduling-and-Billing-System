@@ -2,6 +2,7 @@ package com.example.charging.dto;
 
 import com.example.charging.enums.ChargeMode;
 import com.example.charging.enums.ChargingRequestStatus;
+import com.example.charging.enums.QueueArea;
 import lombok.Data;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -16,6 +17,7 @@ public class ChargingRequestDetailDTO {
     private BigDecimal chargedAmount;
     private ChargingRequestStatus status;
     private Integer queueNumber;
+    private QueueArea queueArea;
     private Long assignedPileId;
     private LocalDateTime createdAt;
     /** 列表展示用：关联车辆车牌 */

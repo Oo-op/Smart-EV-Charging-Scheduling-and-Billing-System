@@ -29,15 +29,18 @@ public class SessionService {
     private final ChargingPileRepository pileRepository;
     private final ChargingSessionRepository sessionRepository;
     private final BillService billService;
+    private final SchedulerService schedulerService;
 
     public SessionService(ChargingRequestRepository requestRepository,
                           ChargingPileRepository pileRepository,
                           ChargingSessionRepository sessionRepository,
-                          BillService billService) {
+                          BillService billService,
+                          SchedulerService schedulerService) {
         this.requestRepository = requestRepository;
         this.pileRepository = pileRepository;
         this.sessionRepository = sessionRepository;
         this.billService = billService;
+        this.schedulerService = schedulerService;
     }
 
     @Transactional
@@ -72,11 +75,14 @@ public class SessionService {
         session.setStatus(ChargingSessionStatus.CHARGING);
 
         request.setStatus(ChargingRequestStatus.CHARGING);
+        request.setQueueArea(null);
+        request.setQueueNumber(null);
         pile.setStatus(ChargingPileStatus.CHARGING);
 
         ChargingSession saved = sessionRepository.save(session);
         requestRepository.save(request);
         pileRepository.save(pile);
+        schedulerService.onPileQueueSlotFreed(pile.getId());
         return toSessionDto(saved, request, pile);
     }
 
@@ -120,6 +126,8 @@ public class SessionService {
         session.setStatus(ChargingSessionStatus.COMPLETED);
         request.setChargedAmount(safe(request.getChargedAmount()).add(actualAmount));
         request.setStatus(ChargingRequestStatus.COMPLETED);
+        request.setQueueArea(null);
+        request.setQueueNumber(null);
         pile.setStatus(ChargingPileStatus.IDLE);
 
         ChargingSession savedSession = sessionRepository.save(session);
@@ -128,6 +136,7 @@ public class SessionService {
 
         // 调用 BillService 分时计费生成账单
         Bill bill = billService.generateBill(savedSession);
+        schedulerService.promoteNextForPile(pile.getId());
         return toStopResult(savedSession, bill);
     }
 

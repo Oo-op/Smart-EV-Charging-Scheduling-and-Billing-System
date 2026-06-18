@@ -88,6 +88,7 @@ CREATE TABLE charging_request (
     charged_amount DECIMAL(15,8) DEFAULT 0,
     status VARCHAR(20) NOT NULL DEFAULT 'WAITING',
     queue_number INT,
+    queue_area VARCHAR(30),
     assigned_pile_id BIGINT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
