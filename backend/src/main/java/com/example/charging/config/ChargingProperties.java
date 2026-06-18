@@ -45,4 +45,12 @@ public class ChargingProperties {
         private int pileCapacity = 2;
         private int waitingAreaCapacity = 10;
     }
+
+    @Data
+    public static class AssignmentProperties {
+        /** 分配桩位后未插枪，自动开始充电的等待分钟数 */
+        private int timeoutMinutes = 5;
+    }
+
+    private AssignmentProperties assignment = new AssignmentProperties();
 }

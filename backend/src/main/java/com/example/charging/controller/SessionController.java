@@ -17,6 +17,11 @@ public class SessionController {
         this.sessionService = sessionService;
     }
 
+    @GetMapping("/active")
+    public SessionDTO getActive(@RequestParam Long requestId, @RequestParam Long userId) {
+        return sessionService.getActiveSession(requestId, userId);
+    }
+
     @PostMapping("/start")
     public SessionDTO start(@RequestBody StartSessionRequest request) {
         return sessionService.start(request.getRequestId(), request.getPileId());

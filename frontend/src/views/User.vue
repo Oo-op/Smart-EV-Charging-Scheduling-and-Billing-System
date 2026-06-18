@@ -8,6 +8,7 @@
         <p class="subtitle">
           在线预约充电桩、实时查看排队进度、充电结束后一键支付。支持快充与慢充，分时电价透明可查。
         </p>
+        <p class="multi-user-hint">每个浏览器标签页可独立登录不同账号，新开标签页即可模拟多用户演示。</p>
       </header>
 
       <section class="highlights">
@@ -123,6 +124,7 @@
               </div>
               <p class="progress-caption">
                 已充 <strong>{{ displayCharged }}</strong> / {{ displayTarget }} kWh
+                <span v-if="currentSession && chargingRemainingText" class="countdown"> · {{ chargingRemainingText }}</span>
               </p>
             </div>
             <dl class="order-details">
@@ -135,6 +137,9 @@
               <p v-if="activeRequest.status === 'WAITING'" class="muted inline-tip">
                 系统会在有空闲桩位时自动尝试分配，无需手动操作。
               </p>
+              <p v-if="activeRequest.status === 'ASSIGNED' && assignmentCountdownText" class="assignment-timeout">
+                {{ assignmentCountdownText }}
+              </p>
               <button
                 v-if="canStartSession"
                 type="button"
@@ -145,13 +150,16 @@
                 {{ loading.start ? '启动中…' : '插枪并开始充电' }}
               </button>
               <template v-if="currentSession">
-                <label class="stop-field">
-                  <span>本次充电量 (kWh)</span>
-                  <input v-model.number="stopForm.chargedAmount" type="number" step="0.1" min="0" />
-                </label>
-                <button type="button" class="btn-primary" :disabled="loading.stop" @click="handleStopSession">
-                  {{ loading.stop ? '结算中…' : '结束充电并结算' }}
+                <p class="charging-live">充电进行中，进度将自动更新</p>
+                <button
+                  type="button"
+                  class="btn-outline"
+                  :disabled="loading.stop || autoStopping"
+                  @click="handleEarlyStop"
+                >
+                  {{ loading.stop || autoStopping ? '结算中…' : '提前结束充电' }}
                 </button>
+                <p class="muted inline-tip">充至目标电量后将自动结束并生成账单</p>
               </template>
               <button type="button" class="btn-text" :disabled="loading.refreshRequest" @click="refreshActiveRequest">
                 刷新订单状态
@@ -173,6 +181,7 @@
             <div v-if="dispatchResult && !currentSession" class="notice success">
               已为您分配 <strong>{{ dispatchResult.pileCode }}</strong> 号桩，预计充电
               {{ dispatchResult.estimatedDurationMinutes }} 分钟。请前往对应车位插枪。
+              <span v-if="activeRequest.status === 'ASSIGNED'">若 {{ assignmentTimeoutMinutes }} 分钟内未手动开始，系统将自动开始计费。</span>
             </div>
           </article>
 
@@ -445,6 +454,7 @@ import {
   getSchedulerQueue,
   dispatchScheduler,
   startSession,
+  getActiveSession,
   stopSession,
   getUserBills,
   payBill
@@ -471,7 +481,14 @@ export default {
       queueInfo: {},
       dispatchResult: null,
       currentSession: null,
-      stopForm: { chargedAmount: 30 },
+      simulatedCharged: 0,
+      chargeRateKwhPerSec: 0,
+      chargeTimerId: null,
+      chargeUiTick: 0,
+      assignmentPollTimerId: null,
+      assignmentCountdownTimerId: null,
+      assignmentUiTick: 0,
+      autoStopping: false,
       stopResult: null,
       bills: [],
       orders: [],
@@ -538,17 +555,48 @@ export default {
       return '';
     },
     displayCharged() {
-      if (this.currentSession) return Number(this.currentSession.chargedAmount ?? 0).toFixed(1);
-      return Number(this.activeRequest?.chargedAmount ?? 0).toFixed(1);
+      void this.chargeUiTick;
+      if (this.currentSession) return this.simulatedCharged.toFixed(2);
+      return Number(this.activeRequest?.chargedAmount ?? 0).toFixed(2);
     },
     displayTarget() {
       if (this.currentSession) return this.currentSession.targetAmount;
       return this.activeRequest?.targetAmount ?? this.requestForm.targetAmount;
     },
     chargePercent() {
+      void this.chargeUiTick;
       const target = Number(this.displayTarget) || 1;
       const charged = Number(this.displayCharged) || 0;
-      return Math.min(100, Math.round((charged / target) * 100));
+      return Math.min(100, (charged / target) * 100);
+    },
+    chargingRemainingText() {
+      void this.chargeUiTick;
+      if (!this.currentSession || !this.chargeRateKwhPerSec) return '';
+      const target = Number(this.currentSession.targetAmount) || 0;
+      const remainingKwh = Math.max(0, target - this.simulatedCharged);
+      if (remainingKwh <= 0.001) return '即将充满';
+      const seconds = Math.max(0, Math.ceil(remainingKwh / this.chargeRateKwhPerSec));
+      const mm = Math.floor(seconds / 60);
+      const ss = String(seconds % 60).padStart(2, '0');
+      return `剩余 ${mm}:${ss}`;
+    },
+    assignmentTimeoutMinutes() {
+      return this.activeRequest?.assignmentTimeoutMinutes ?? 5;
+    },
+    assignmentCountdownText() {
+      void this.assignmentUiTick;
+      if (this.activeRequest?.status !== 'ASSIGNED') return '';
+      const deadline = this.parseDateTime(this.activeRequest.autoStartAt)
+        || this.computeAutoStartDeadline();
+      if (!deadline) {
+        return `请在 ${this.assignmentTimeoutMinutes} 分钟内插枪并开始充电，超时将自动开始计费`;
+      }
+      const remainingMs = deadline.getTime() - Date.now();
+      if (remainingMs <= 0) return '即将自动开始充电…';
+      const totalSec = Math.ceil(remainingMs / 1000);
+      const mm = Math.floor(totalSec / 60);
+      const ss = String(totalSec % 60).padStart(2, '0');
+      return `请在 ${mm}:${ss} 内插枪并开始充电，超时将自动开始计费`;
     },
     flowSteps() {
       const hasVehicle = this.vehicles.length > 0;
@@ -563,8 +611,26 @@ export default {
       ];
     }
   },
+  watch: {
+    'activeRequest.status': {
+      handler(status) {
+        if (status === 'ASSIGNED') {
+          this.startAssignmentPolling();
+        } else {
+          this.stopAssignmentPolling();
+          if (status === 'CHARGING' && !this.currentSession) {
+            this.loadActiveSessionAndStartSimulation();
+          }
+        }
+      }
+    }
+  },
   mounted() {
     this.restoreSession();
+  },
+  beforeUnmount() {
+    this.stopChargeSimulation();
+    this.stopAssignmentPolling();
   },
   methods: {
     getStatusDesc,
@@ -616,17 +682,194 @@ export default {
         this.loginForm.username = saved.username || '';
         this.loadVehicles();
         this.loadBills();
-        this.loadOrders();
+        this.loadOrders().then(() => this.restoreChargeStateIfNeeded());
         this.loadQueue();
       }
     },
+    chargeStateStorageKey() {
+      return `smart_charging_active_charge_${this.session.userId || 'guest'}`;
+    },
+    persistChargeState() {
+      if (!this.currentSession?.sessionId) return;
+      sessionStorage.setItem(
+        this.chargeStateStorageKey(),
+        JSON.stringify({
+          sessionId: this.currentSession.sessionId,
+          requestId: this.currentSession.requestId,
+          pileId: this.currentSession.pileId,
+          mode: this.currentSession.mode,
+          targetAmount: this.currentSession.targetAmount,
+          startTime: this.currentSession.startTime,
+          estimatedEndTime: this.currentSession.estimatedEndTime,
+          simulatedCharged: this.simulatedCharged
+        })
+      );
+    },
+    clearPersistedChargeState() {
+      sessionStorage.removeItem(this.chargeStateStorageKey());
+    },
+    parseDateTime(value) {
+      if (!value) return null;
+      return new Date(String(value).replace(' ', 'T'));
+    },
+    computeAutoStartDeadline() {
+      const assignedAt = this.parseDateTime(this.activeRequest?.assignedAt);
+      if (!assignedAt) return null;
+      return new Date(assignedAt.getTime() + this.assignmentTimeoutMinutes * 60 * 1000);
+    },
+    startAssignmentPolling() {
+      this.stopAssignmentPolling();
+      if (this.activeRequest?.status !== 'ASSIGNED') return;
+      this.assignmentPollTimerId = window.setInterval(() => {
+        this.refreshActiveRequest({ silent: true });
+      }, 5000);
+      this.assignmentCountdownTimerId = window.setInterval(() => {
+        this.assignmentUiTick += 1;
+      }, 1000);
+    },
+    stopAssignmentPolling() {
+      if (this.assignmentPollTimerId) {
+        clearInterval(this.assignmentPollTimerId);
+        this.assignmentPollTimerId = null;
+      }
+      if (this.assignmentCountdownTimerId) {
+        clearInterval(this.assignmentCountdownTimerId);
+        this.assignmentCountdownTimerId = null;
+      }
+    },
+    async loadActiveSessionAndStartSimulation({ notifyAutoStart = true } = {}) {
+      if (!this.activeRequest?.requestId || this.currentSession) return;
+      try {
+        this.currentSession = await getActiveSession(this.activeRequest.requestId, this.session.userId);
+        this.startChargeSimulation();
+        if (notifyAutoStart) {
+          this.notify('系统已自动开始充电（分配后超时未插枪）', 'info');
+        }
+      } catch {
+        // 会话尚未就绪，下一轮轮询重试
+      }
+    },
+    computeChargeRate(session) {
+      const target = Number(session.targetAmount) || 0;
+      const start = this.parseDateTime(session.startTime);
+      const end = this.parseDateTime(session.estimatedEndTime);
+      if (start && end && end > start && target > 0) {
+        const seconds = (end.getTime() - start.getTime()) / 1000;
+        if (seconds > 0) return target / seconds;
+      }
+      const powerKw = session.mode === 'SLOW' ? 7 : 60;
+      return powerKw / 3600;
+    },
+    syncSimulatedFromElapsed() {
+      if (!this.currentSession) return;
+      const start = this.parseDateTime(this.currentSession.startTime);
+      if (!start) return;
+      const elapsedSec = Math.max(0, (Date.now() - start.getTime()) / 1000);
+      const target = Number(this.currentSession.targetAmount) || 0;
+      const simulated = Math.min(target, elapsedSec * this.chargeRateKwhPerSec);
+      this.simulatedCharged = Math.round(simulated * 100) / 100;
+    },
+    startChargeSimulation({ resume = false } = {}) {
+      if (!this.currentSession) return;
+      this.stopChargeSimulation();
+      this.chargeRateKwhPerSec = this.computeChargeRate(this.currentSession);
+      if (!resume) {
+        this.simulatedCharged = 0;
+      }
+      this.syncSimulatedFromElapsed();
+      const target = Number(this.currentSession.targetAmount) || 0;
+      if (this.simulatedCharged >= target) {
+        this.simulatedCharged = target;
+        this.autoCompleteCharging();
+        return;
+      }
+      this.persistChargeState();
+      this.chargeUiTick += 1;
+      this.chargeTimerId = window.setInterval(() => this.tickCharge(), 250);
+    },
+    stopChargeSimulation() {
+      if (this.chargeTimerId) {
+        clearInterval(this.chargeTimerId);
+        this.chargeTimerId = null;
+      }
+    },
+    tickCharge() {
+      if (!this.currentSession || this.loading.stop || this.autoStopping) return;
+      this.chargeUiTick += 1;
+      this.syncSimulatedFromElapsed();
+      const target = Number(this.currentSession.targetAmount) || 0;
+      if (this.simulatedCharged >= target) {
+        this.simulatedCharged = target;
+        this.autoCompleteCharging();
+        return;
+      }
+      this.persistChargeState();
+    },
+    async restoreChargeStateIfNeeded() {
+      if (this.currentSession) return;
+      let saved = null;
+      try {
+        const raw = sessionStorage.getItem(this.chargeStateStorageKey());
+        saved = raw ? JSON.parse(raw) : null;
+      } catch {
+        saved = null;
+      }
+      if (!saved?.sessionId) return;
+      const ongoing = this.orders.find(
+        (o) => o.requestId === saved.requestId && o.status === 'CHARGING'
+      );
+      if (!ongoing) {
+        this.clearPersistedChargeState();
+        return;
+      }
+      this.activeRequest = ongoing;
+      if (ongoing.status === 'CHARGING' && !saved?.sessionId) {
+        await this.loadActiveSessionAndStartSimulation({ notifyAutoStart: false });
+        return;
+      }
+      if (ongoing.assignedPileId && !this.dispatchResult) {
+        this.dispatchResult = { pileCode: `#${ongoing.assignedPileId}` };
+      }
+      this.currentSession = {
+        sessionId: saved.sessionId,
+        requestId: saved.requestId,
+        pileId: saved.pileId,
+        mode: saved.mode || ongoing.mode,
+        targetAmount: saved.targetAmount ?? ongoing.targetAmount,
+        startTime: saved.startTime,
+        estimatedEndTime: saved.estimatedEndTime
+      };
+      this.startChargeSimulation({ resume: true });
+    },
+    async handleEarlyStop() {
+      const charged = this.simulatedCharged;
+      const message =
+        charged <= 0
+          ? '当前几乎未充电，确定要提前结束吗？'
+          : `当前已充 ${charged.toFixed(1)} kWh，确定提前结束充电吗？`;
+      if (!window.confirm(message)) return;
+      await this.handleStopSession(charged, { manual: true });
+    },
+    async autoCompleteCharging() {
+      if (this.autoStopping || this.loading.stop || !this.currentSession) return;
+      this.autoStopping = true;
+      this.stopChargeSimulation();
+      const target = Number(this.currentSession.targetAmount) || this.simulatedCharged;
+      await this.handleStopSession(target, { manual: false });
+    },
     logout() {
+      this.stopChargeSimulation();
+      this.stopAssignmentPolling();
+      this.clearPersistedChargeState();
       this.session = { userId: null, username: '', token: '', role: '' };
       clearSession();
       this.vehicles = [];
       this.selectedVehicleId = null;
       this.activeRequest = null;
       this.currentSession = null;
+      this.simulatedCharged = 0;
+      this.chargeRateKwhPerSec = 0;
+      this.autoStopping = false;
       this.bills = [];
       this.orders = [];
       this.pageTab = 'charge';
@@ -660,7 +903,7 @@ export default {
         this.notify(`欢迎回来，${res.username}`, 'success');
         await this.loadVehicles();
         await this.loadBills();
-        await this.loadOrders();
+        await this.loadOrders().then(() => this.restoreChargeStateIfNeeded());
         await this.loadQueue();
       } catch (err) {
         this.notify(err.message || '登录失败', 'error');
@@ -724,9 +967,13 @@ export default {
           mode: this.requestForm.mode,
           targetAmount: this.requestForm.targetAmount
         });
-        this.stopForm.chargedAmount = this.requestForm.targetAmount;
         this.dispatchResult = null;
         this.currentSession = null;
+        this.simulatedCharged = 0;
+        this.chargeRateKwhPerSec = 0;
+        this.autoStopping = false;
+        this.stopChargeSimulation();
+        this.clearPersistedChargeState();
         this.stopResult = null;
         await this.loadQueue();
         await this.loadOrders();
@@ -752,19 +999,22 @@ export default {
         this.loading.request = false;
       }
     },
-    async refreshActiveRequest() {
+    async refreshActiveRequest({ silent = false } = {}) {
       if (!this.activeRequest?.requestId) return;
-      this.loading.refreshRequest = true;
+      if (!silent) this.loading.refreshRequest = true;
       try {
         this.activeRequest = await getChargingRequest(this.activeRequest.requestId, this.session.userId);
         if (this.activeRequest.assignedPileId && !this.dispatchResult) {
           this.dispatchResult = { pileCode: `#${this.activeRequest.assignedPileId}` };
         }
+        if (this.activeRequest.status === 'CHARGING' && !this.currentSession) {
+          await this.loadActiveSessionAndStartSimulation({ notifyAutoStart: !silent });
+        }
         await this.loadOrders();
       } catch (err) {
-        this.notify(err.message || '刷新失败', 'error');
+        if (!silent) this.notify(err.message || '刷新失败', 'error');
       } finally {
-        this.loading.refreshRequest = false;
+        if (!silent) this.loading.refreshRequest = false;
       }
     },
     async handleCancelRequest() {
@@ -836,30 +1086,41 @@ export default {
           pileId: this.activeRequest.assignedPileId
         });
         await this.refreshActiveRequest();
-        this.stopForm.chargedAmount = this.currentSession.targetAmount;
-        this.notify('充电已开始', 'success');
+        this.startChargeSimulation();
+        this.notify('充电已开始，充满后将自动结束', 'success');
       } catch (err) {
         this.notify(err.message || '启动失败，请确认已插枪', 'error');
       } finally {
         this.loading.start = false;
       }
     },
-    async handleStopSession() {
+    async handleStopSession(chargedAmount, { manual = true } = {}) {
+      if (this.loading.stop || !this.currentSession) return;
       this.loading.stop = true;
+      this.stopChargeSimulation();
+      const target = Number(this.currentSession.targetAmount) || 0;
+      let amount = Number(chargedAmount ?? this.simulatedCharged);
+      if (!Number.isFinite(amount) || amount < 0) amount = 0;
+      amount = Math.min(target, Math.round(amount * 10) / 10);
       try {
         this.stopResult = await stopSession(this.currentSession.sessionId, {
-          chargedAmount: this.stopForm.chargedAmount
+          chargedAmount: amount
         });
         this.currentSession = null;
+        this.simulatedCharged = 0;
+        this.chargeRateKwhPerSec = 0;
+        this.clearPersistedChargeState();
         await this.refreshActiveRequest();
         await this.loadOrders();
         await this.loadBills();
         this.pageTab = 'bills';
-        this.notify(`充电结束，请支付 ¥${this.stopResult.bill?.totalFee}`, 'success');
+        const prefix = manual ? '充电已结束' : '已充满，充电自动结束';
+        this.notify(`${prefix}，请支付 ¥${this.stopResult.bill?.totalFee}`, 'success');
       } catch (err) {
         this.notify(err.message || '结束充电失败', 'error');
       } finally {
         this.loading.stop = false;
+        this.autoStopping = false;
       }
     },
     async loadBills() {
@@ -956,6 +1217,14 @@ export default {
   color: #4a5670;
 }
 
+.multi-user-hint {
+  margin: 10px 0 0;
+  max-width: 640px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #6b7a94;
+}
+
 .highlights {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -1043,6 +1312,31 @@ export default {
 .auth-form input,
 .bind-form input,
 .field-block input,
+.stop-field input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid rgba(23, 32, 51, 0.12);
+  border-radius: 12px;
+  font-size: 15px;
+}
+
+.progress-caption .countdown {
+  color: #1f5fbf;
+  font-weight: 600;
+}
+
+.charging-live {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: #1f5fbf;
+  font-weight: 600;
+}
+
+.charging-live .muted {
+  font-weight: 400;
+  color: #6b7a94;
+}
+
 .stop-field input {
   width: 100%;
   padding: 12px 14px;
@@ -1141,6 +1435,15 @@ export default {
   margin: 0;
 }
 
+.assignment-timeout {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(184, 134, 11, 0.12);
+  color: #8a6a00;
+  font-size: 0.92rem;
+}
+
 .layout-main {
   display: grid;
   grid-template-columns: 1fr 320px;
@@ -1237,7 +1540,7 @@ export default {
   height: 100%;
   border-radius: 999px;
   background: linear-gradient(90deg, #1e6b3a, #39c179);
-  transition: width 0.4s ease;
+  transition: width 0.25s linear;
 }
 
 .progress-caption {

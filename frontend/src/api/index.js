@@ -101,6 +101,7 @@ export function recoverPile(pileId) {
 }
 
 export function updatePileCapacity(pileId, payload) {
+  /** @returns {Promise<{ pile, dispatchTriggered, assignedCount, dispatchResults, note }>} */
   return request.patch(`/piles/${pileId}/capacity`, payload);
 }
 
@@ -108,6 +109,10 @@ export function updatePileCapacity(pileId, payload) {
 
 export function startSession(payload) {
   return request.post('/sessions/start', payload);
+}
+
+export function getActiveSession(requestId, userId) {
+  return request.get('/sessions/active', { params: { requestId, userId } });
 }
 
 export function stopSession(sessionId, payload = {}) {

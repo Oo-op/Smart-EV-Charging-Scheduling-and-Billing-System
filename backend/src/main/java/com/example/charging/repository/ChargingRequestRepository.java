@@ -37,4 +37,7 @@ public interface ChargingRequestRepository extends JpaRepository<ChargingRequest
     Optional<ChargingRequest> findByIdAndUserId(Long id, Long userId);
 
     List<ChargingRequest> findByUserIdOrderByCreatedAtDesc(Long userId);
+
+    List<ChargingRequest> findByStatusAndAssignedAtLessThanEqual(
+            ChargingRequestStatus status, java.time.LocalDateTime threshold);
 }

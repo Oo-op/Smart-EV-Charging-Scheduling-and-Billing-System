@@ -118,13 +118,30 @@ public class DemoDataBootstrap implements ApplicationRunner {
     }
 
     private void ensureDefaultAdmin() {
-        userRepository.findByUsername("admin").orElseGet(() -> {
+        userRepository.findByUsername("admin").ifPresentOrElse(user -> {
+            boolean changed = false;
+            if (!"ADMIN".equalsIgnoreCase(user.getRole())) {
+                user.setRole("ADMIN");
+                changed = true;
+            }
+            if (!"admin123456".equals(user.getPassword())) {
+                user.setPassword("admin123456");
+                changed = true;
+            }
+            if (user.getPhone() == null || user.getPhone().isBlank()) {
+                user.setPhone("13800000000");
+                changed = true;
+            }
+            if (changed) {
+                userRepository.save(user);
+            }
+        }, () -> {
             User user = new User();
             user.setUsername("admin");
             user.setPassword("admin123456");
             user.setPhone("13800000000");
             user.setRole("ADMIN");
-            return userRepository.save(user);
+            userRepository.save(user);
         });
     }
 

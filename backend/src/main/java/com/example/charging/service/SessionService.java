@@ -1,5 +1,6 @@
 package com.example.charging.service;
 
+import com.example.charging.config.ChargingProperties;
 import com.example.charging.dto.BillSummaryDTO;
 import com.example.charging.dto.SessionDTO;
 import com.example.charging.dto.StopSessionRequest;
@@ -21,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Service
 public class SessionService {
@@ -30,17 +32,55 @@ public class SessionService {
     private final ChargingSessionRepository sessionRepository;
     private final BillService billService;
     private final SchedulerService schedulerService;
+    private final ChargingProperties chargingProperties;
 
     public SessionService(ChargingRequestRepository requestRepository,
                           ChargingPileRepository pileRepository,
                           ChargingSessionRepository sessionRepository,
                           BillService billService,
-                          SchedulerService schedulerService) {
+                          SchedulerService schedulerService,
+                          ChargingProperties chargingProperties) {
         this.requestRepository = requestRepository;
         this.pileRepository = pileRepository;
         this.sessionRepository = sessionRepository;
         this.billService = billService;
         this.schedulerService = schedulerService;
+        this.chargingProperties = chargingProperties;
+    }
+
+    public SessionDTO getActiveSession(Long requestId, Long userId) {
+        ChargingRequest request = requestRepository.findByIdAndUserId(requestId, userId)
+                .orElseThrow(() -> new IllegalArgumentException("Request not found or access denied"));
+        if (request.getStatus() != ChargingRequestStatus.CHARGING) {
+            throw new IllegalArgumentException("当前请求不在充电中");
+        }
+        ChargingSession session = sessionRepository
+                .findFirstByRequestIdAndStatus(requestId, ChargingSessionStatus.CHARGING)
+                .orElseThrow(() -> new IllegalArgumentException("未找到进行中的充电会话"));
+        ChargingPile pile = pileRepository.findById(session.getPileId())
+                .orElseThrow(() -> new IllegalArgumentException("充电桩不存在"));
+        return toSessionDto(session, request, pile);
+    }
+
+    @Transactional
+    public int autoStartTimedOutAssignments() {
+        int timeoutMinutes = chargingProperties.getAssignment().getTimeoutMinutes();
+        LocalDateTime threshold = LocalDateTime.now().minusMinutes(timeoutMinutes);
+        List<ChargingRequest> expired = requestRepository.findByStatusAndAssignedAtLessThanEqual(
+                ChargingRequestStatus.ASSIGNED, threshold);
+        int started = 0;
+        for (ChargingRequest request : expired) {
+            if (request.getAssignedPileId() == null) {
+                continue;
+            }
+            try {
+                start(request.getId(), request.getAssignedPileId());
+                started++;
+            } catch (RuntimeException ignored) {
+                // 并发或状态变化时跳过，下一轮重试
+            }
+        }
+        return started;
     }
 
     @Transactional
@@ -75,6 +115,7 @@ public class SessionService {
         session.setStatus(ChargingSessionStatus.CHARGING);
 
         request.setStatus(ChargingRequestStatus.CHARGING);
+        request.setAssignedAt(null);
         request.setQueueArea(null);
         request.setQueueNumber(null);
         pile.setStatus(ChargingPileStatus.CHARGING);

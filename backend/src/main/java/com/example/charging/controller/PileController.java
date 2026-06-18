@@ -1,7 +1,8 @@
 package com.example.charging.controller;
 
-import com.example.charging.dto.PileDTO;
 import com.example.charging.dto.AdminPileCapacityUpdateRequest;
+import com.example.charging.dto.PileCapacityUpdateResult;
+import com.example.charging.dto.PileDTO;
 import com.example.charging.dto.PileFaultRequest;
 import com.example.charging.dto.PileFaultResult;
 import com.example.charging.dto.PileRecoverResult;
@@ -29,7 +30,7 @@ public class PileController {
     }
 
     @PatchMapping("/{pileId}/capacity")
-    public PileDTO updateCapacity(@PathVariable Long pileId,
+    public PileCapacityUpdateResult updateCapacity(@PathVariable Long pileId,
                                   @RequestHeader(value = "Authorization", required = false) String authorization,
                                   @RequestBody AdminPileCapacityUpdateRequest request) {
         userService.requireAdmin(authorization);

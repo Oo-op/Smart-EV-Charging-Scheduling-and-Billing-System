@@ -28,7 +28,7 @@
 
         <aside class="auth-card">
           <div class="auth-tabs">
-            <button type="button" :class="{ active: authMode === 'user-login' }" @click="authMode = 'user-login'">
+            <button type="button" :class="{ active: authMode === 'user-login' }" @click="openRole('user-login')">
               <span class="tab-icon">👤</span>
               <span>用户登录</span>
             </button>
@@ -36,7 +36,7 @@
               <span class="tab-icon">📝</span>
               <span>用户注册</span>
             </button>
-            <button type="button" :class="{ active: authMode === 'admin-login' }" @click="authMode = 'admin-login'">
+            <button type="button" :class="{ active: authMode === 'admin-login' }" @click="openRole('admin-login')">
               <span class="tab-icon">🔧</span>
               <span>管理员</span>
             </button>
@@ -100,6 +100,7 @@
               <div class="note-icon">📌</div>
               <div class="note-content">
                 <span>还没有账号？点击上方"用户注册"创建</span>
+                <span class="note-sub">多用户演示：新开一个浏览器标签页，可分别登录不同账号</span>
               </div>
             </template>
           </div>
@@ -134,9 +135,13 @@ export default {
   methods: {
     openRole(mode) {
       this.authMode = mode;
+      this.message = '';
       if (mode === 'admin-login') {
-        this.loginForm.username ||= 'admin';
-        this.loginForm.password ||= 'admin123456';
+        this.loginForm.username = 'admin';
+        this.loginForm.password = 'admin123456';
+      } else if (mode === 'user-login') {
+        this.loginForm.username = '';
+        this.loginForm.password = '';
       }
     },
     notify(text, type = 'info') {
@@ -468,6 +473,12 @@ export default {
 .note-content strong {
   color: #334155;
   font-weight: 600;
+}
+
+.note-sub {
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.5;
 }
 
 @media (max-width: 640px) {

@@ -195,6 +195,7 @@ import {
   recoverPile as recoverPileApi,
   updatePileCapacity
 } from '../api';
+import { formatPileCapacityMessage } from '../api/pileCapacity';
 import { getStatusDesc } from '../api/enums';
 import QueueList from '../components/QueueList.vue';
 import { authState, clearSession } from '../session';
@@ -249,6 +250,10 @@ export default {
         this.queue = queue;
       } catch (err) {
         this.error = err.message || '加载管理端数据失败';
+        if (/登录|管理权限|登录态/.test(this.error)) {
+          clearSession();
+          this.$router.push({ name: 'Home', query: { redirect: '/admin' } });
+        }
       } finally {
         this.loading = false;
       }
@@ -288,10 +293,9 @@ export default {
       this.actionPileId = pile.pileId;
       this.actionMessage = '';
       try {
-        const updated = await updatePileCapacity(pile.pileId, { enabled: !pile.enabled });
-        this.actionMessage = updated.enabled
-          ? `充电桩 ${pile.code} 已开放`
-          : `充电桩 ${pile.code} 已关闭`;
+        const opening = !pile.enabled;
+        const result = await updatePileCapacity(pile.pileId, { enabled: opening });
+        this.actionMessage = formatPileCapacityMessage(pile.code, result, { opening });
         await this.refreshAll();
       } catch (err) {
         this.actionMessage = err.message || '更新开放状态失败';
@@ -313,8 +317,8 @@ export default {
       this.actionPileId = pile.pileId;
       this.actionMessage = '';
       try {
-        const updated = await updatePileCapacity(pile.pileId, { openQueueSlots });
-        this.actionMessage = `充电桩 ${pile.code} 的开放位置已调整为 ${updated.openQueueSlots}/${updated.maxQueueSlots}`;
+        const result = await updatePileCapacity(pile.pileId, { openQueueSlots });
+        this.actionMessage = formatPileCapacityMessage(pile.code, result);
         await this.refreshAll();
       } catch (err) {
         this.actionMessage = err.message || '更新开放位置失败';

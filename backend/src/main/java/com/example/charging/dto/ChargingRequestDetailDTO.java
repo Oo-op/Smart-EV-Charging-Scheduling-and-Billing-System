@@ -20,6 +20,14 @@ public class ChargingRequestDetailDTO {
     private QueueArea queueArea;
     private Long assignedPileId;
     private LocalDateTime createdAt;
+    /** 分配桩位时间（status=ASSIGNED 时有值） */
+    private LocalDateTime assignedAt;
+    /** 超时自动开始充电截止时间（assignedAt + timeoutMinutes） */
+    private LocalDateTime autoStartAt;
+    /** 与后端 charging.assignment.timeout-minutes 一致 */
+    private Integer assignmentTimeoutMinutes;
+    /** 进行中会话 ID（status=CHARGING 时有值） */
+    private Long activeSessionId;
     /** 列表展示用：关联车辆车牌 */
     private String plateNumber;
 }

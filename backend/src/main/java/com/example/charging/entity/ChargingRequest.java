@@ -60,6 +60,10 @@ public class ChargingRequest {
     @Column(name = "assigned_pile_id")
     private Long assignedPileId;
 
+    /** 分配桩位（ASSIGNED）的时间，用于插枪超时自动开始充电 */
+    @Column(name = "assigned_at")
+    private LocalDateTime assignedAt;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;

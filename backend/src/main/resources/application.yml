@@ -25,3 +25,7 @@ server:
   port: 8080
   servlet:
     context-path: /api
+
+charging:
+  assignment:
+    timeout-minutes: 5

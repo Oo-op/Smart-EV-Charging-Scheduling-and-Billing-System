@@ -1,5 +1,6 @@
 package com.example.charging.service;
 
+import com.example.charging.config.ChargingProperties;
 import com.example.charging.dto.ChargingRequestDetailDTO;
 import com.example.charging.dto.ChargingRequestModifyRequest;
 import com.example.charging.dto.ChargingRequestSubmitRequest;
@@ -8,14 +9,17 @@ import com.example.charging.entity.User;
 import com.example.charging.entity.Vehicle;
 import com.example.charging.enums.ChargeMode;
 import com.example.charging.enums.ChargingRequestStatus;
+import com.example.charging.enums.ChargingSessionStatus;
 import com.example.charging.enums.QueueArea;
 import com.example.charging.repository.ChargingRequestRepository;
+import com.example.charging.repository.ChargingSessionRepository;
 import com.example.charging.repository.UserRepository;
 import com.example.charging.repository.VehicleRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -28,15 +32,21 @@ public class ChargingRequestService {
     private final UserRepository userRepository;
     private final VehicleRepository vehicleRepository;
     private final SchedulerService schedulerService;
+    private final ChargingSessionRepository sessionRepository;
+    private final ChargingProperties chargingProperties;
 
     public ChargingRequestService(ChargingRequestRepository requestRepository,
                                   UserRepository userRepository,
                                   VehicleRepository vehicleRepository,
-                                  SchedulerService schedulerService) {
+                                  SchedulerService schedulerService,
+                                  ChargingSessionRepository sessionRepository,
+                                  ChargingProperties chargingProperties) {
         this.requestRepository = requestRepository;
         this.userRepository = userRepository;
         this.vehicleRepository = vehicleRepository;
         this.schedulerService = schedulerService;
+        this.sessionRepository = sessionRepository;
+        this.chargingProperties = chargingProperties;
     }
 
     @Transactional
@@ -106,6 +116,7 @@ public class ChargingRequestService {
         QueueArea previousArea = request.getQueueArea();
         request.setStatus(ChargingRequestStatus.CANCELLED);
         request.setAssignedPileId(null);
+        request.setAssignedAt(null);
         request.setQueueArea(null);
         request.setQueueNumber(null);
         ChargingRequest saved = requestRepository.save(request);
@@ -149,6 +160,7 @@ public class ChargingRequestService {
         }
         request.setStatus(ChargingRequestStatus.WAITING);
         request.setAssignedPileId(null);
+        request.setAssignedAt(null);
         request.setQueueArea(QueueArea.WAITING_AREA);
         request.setQueueNumber(null);
 
@@ -180,6 +192,16 @@ public class ChargingRequestService {
         dto.setQueueArea(request.getQueueArea());
         dto.setAssignedPileId(request.getAssignedPileId());
         dto.setCreatedAt(request.getCreatedAt());
+        dto.setAssignedAt(request.getAssignedAt());
+        int timeoutMinutes = chargingProperties.getAssignment().getTimeoutMinutes();
+        dto.setAssignmentTimeoutMinutes(timeoutMinutes);
+        if (request.getAssignedAt() != null && request.getStatus() == ChargingRequestStatus.ASSIGNED) {
+            dto.setAutoStartAt(request.getAssignedAt().plusMinutes(timeoutMinutes));
+        }
+        if (request.getStatus() == ChargingRequestStatus.CHARGING) {
+            sessionRepository.findFirstByRequestIdAndStatus(request.getId(), ChargingSessionStatus.CHARGING)
+                    .ifPresent(session -> dto.setActiveSessionId(session.getId()));
+        }
         dto.setPlateNumber(plateNumber);
         return dto;
     }

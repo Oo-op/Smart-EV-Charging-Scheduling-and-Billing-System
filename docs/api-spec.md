@@ -288,9 +288,22 @@ USER / ADMIN
     "status": "ASSIGNED",
     "queueNumber": 1,
     "assignedPileId": 1,
+    "assignedAt": "2026-06-13 10:05:00",
+    "autoStartAt": "2026-06-13 10:10:00",
+    "assignmentTimeoutMinutes": 5,
+    "activeSessionId": null,
     "createdAt": "2026-06-13 10:00:00"
   }
 }
+```
+
+业务规则（分配超时）：
+
+```text
+1. 请求进入 ASSIGNED 时记录 assignedAt。
+2. 若用户在 assignmentTimeoutMinutes（默认 5）内未调用开始充电，后台定时任务自动创建会话并开始计费。
+3. autoStartAt = assignedAt + assignmentTimeoutMinutes，供前端倒计时展示。
+4. 状态变为 CHARGING 后 activeSessionId 为当前进行中的 sessionId。
 ```
 
 ---
@@ -455,6 +468,71 @@ USER / ADMIN
     }
   ]
 }
+```
+
+---
+
+## 5.1.1 管理端开放/关闭桩位（触发调度）
+
+| 项目   | 内容                                      |
+| ---- | --------------------------------------- |
+| 接口   | `PATCH /api/piles/{pileId}/capacity`    |
+| 负责人  | C + E（管理端）                              |
+| 功能   | 开放/关闭桩位或调整开放排队位数；**开放后对同模式等候区全部车辆重新调度（SJF）** |
+| 路径参数 | `pileId`                                |
+| 请求体  | `enabled`（可选）、`openQueueSlots`（可选）      |
+| 返回   | `PileCapacityUpdateResult`              |
+
+请求示例（开放桩位）：
+
+```json
+{
+  "enabled": true
+}
+```
+
+响应示例：
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "pile": {
+      "pileId": 3,
+      "code": "S02",
+      "mode": "SLOW",
+      "power": 7.0,
+      "status": "IDLE",
+      "enabled": true,
+      "openQueueSlots": 1,
+      "maxQueueSlots": 3
+    },
+    "dispatchTriggered": true,
+    "assignedCount": 2,
+    "dispatchResults": [
+      {
+        "algorithm": "SJF",
+        "requestId": 1001,
+        "pileId": 3,
+        "pileCode": "S02",
+        "requestStatus": "ASSIGNED",
+        "pileStatus": "RESERVED"
+      }
+    ],
+    "note": "开放桩位后已对等候区全部车辆重新调度（SJF）"
+  }
+}
+```
+
+业务规则：
+
+```text
+1. 桩位变为「空闲 + 已开放 + openQueueSlots > 0」且（首次可分配或开放位数增加）时，调用 redispatchWaitingArea(mode)。
+2. redispatchWaitingArea：将同模式 WAITING_AREA 中所有 WAITING 请求重置回总等候区，释放无 ASSIGNED 头的 RESERVED 桩，再按 SJF 全量 triggerDispatch。
+3. RECOVERY_QUEUE / MIGRATION_QUEUE 中的请求不参与此次重置，仍按优先级调度。
+4. 仅缩小开放容量或关闭桩位时不触发调度。
+5. 关闭桩位时，若桩为 CHARGING / RESERVED 则拒绝操作。
 ```
 
 ---
@@ -724,7 +802,29 @@ USER / ADMIN
 4. session.status = CHARGING。
 5. request.status = CHARGING。
 6. pile.status = CHARGING。
+7. 清除 assignedAt（计时结束）。
 ```
+
+---
+
+## 7.1.1 查询进行中的会话
+
+| 项目  | 内容 |
+| --- | --- |
+| 接口  | `GET /api/sessions/active?requestId=&userId=` |
+| 负责人 | C + E |
+| 功能  | 按充电请求查询当前 CHARGING 会话（含后端超时自动开始后前端拉取） |
+| 返回  | 与开始充电相同的 SessionDTO |
+
+---
+
+## 7.1.2 分配超时自动开始（后台）
+
+| 项目 | 内容 |
+| --- | --- |
+| 配置 | `charging.assignment.timeout-minutes`（默认 5） |
+| 机制 | 定时任务每 30 秒扫描 ASSIGNED 且 assignedAt 已超时的请求，自动调用 start |
+| 前端 | 展示 autoStartAt 倒计时；ASSIGNED 期间轮询订单，变为 CHARGING 后调用 `/sessions/active` 并开始进度模拟 |
 
 ---
 

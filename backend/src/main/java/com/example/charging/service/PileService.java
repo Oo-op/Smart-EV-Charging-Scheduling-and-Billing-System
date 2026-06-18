@@ -1,6 +1,8 @@
 package com.example.charging.service;
 
 import com.example.charging.dto.AdminPileCapacityUpdateRequest;
+import com.example.charging.dto.DispatchResult;
+import com.example.charging.dto.PileCapacityUpdateResult;
 import com.example.charging.dto.PileDTO;
 import com.example.charging.dto.PileFaultResult;
 import com.example.charging.dto.PileRecoverResult;
@@ -18,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 @Service
@@ -45,7 +48,7 @@ public class PileService {
     }
 
     @Transactional
-    public PileDTO updateCapacity(Long pileId, AdminPileCapacityUpdateRequest request) {
+    public PileCapacityUpdateResult updateCapacity(Long pileId, AdminPileCapacityUpdateRequest request) {
         ChargingPile pile = pileRepository.findById(pileId)
                 .orElseThrow(() -> new IllegalArgumentException("充电桩不存在"));
 
@@ -53,6 +56,9 @@ public class PileService {
                 && (pile.getStatus() == ChargingPileStatus.CHARGING || pile.getStatus() == ChargingPileStatus.RESERVED)) {
             throw new IllegalArgumentException("充电中或已分配中的充电桩不能直接关闭");
         }
+
+        boolean wasDispatchEligible = isDispatchEligible(pile);
+        int previousOpenSlots = safeInt(pile.getOpenQueueSlots(), 0);
 
         if (request.getEnabled() != null) {
             pile.setEnabled(request.getEnabled());
@@ -87,7 +93,33 @@ public class PileService {
             }
         }
 
-        return toDto(pileRepository.save(pile));
+        ChargingPile saved = pileRepository.save(pile);
+        boolean nowDispatchEligible = isDispatchEligible(saved);
+        boolean slotsIncreased = safeInt(saved.getOpenQueueSlots(), 0) > previousOpenSlots;
+
+        PileCapacityUpdateResult result = new PileCapacityUpdateResult();
+        result.setPile(toDto(saved));
+
+        if (nowDispatchEligible && (!wasDispatchEligible || slotsIncreased)) {
+            List<DispatchResult> dispatchResults = schedulerService.redispatchWaitingArea(saved.getMode());
+            result.setDispatchTriggered(true);
+            result.setAssignedCount(dispatchResults.size());
+            result.setDispatchResults(dispatchResults);
+            result.setNote("开放桩位后已对等候区全部车辆重新调度（SJF）");
+        } else {
+            result.setDispatchTriggered(false);
+            result.setAssignedCount(0);
+            result.setDispatchResults(new ArrayList<>());
+            result.setNote("未触发调度：桩位未变为可分配空闲状态，或仅缩小开放容量");
+        }
+        return result;
+    }
+
+    /** 空闲、已开放且有空位的桩才参与「开桩消化等候区」调度 */
+    private boolean isDispatchEligible(ChargingPile pile) {
+        return Boolean.TRUE.equals(pile.getEnabled())
+                && safeInt(pile.getOpenQueueSlots(), 0) > 0
+                && pile.getStatus() == ChargingPileStatus.IDLE;
     }
 
     @Transactional

@@ -81,6 +81,24 @@ public class SchedulerService {
     }
 
     @Transactional
+    public List<DispatchResult> redispatchWaitingArea(ChargeMode mode) {
+        if (mode == null) {
+            throw new IllegalArgumentException("Charging mode cannot be null");
+        }
+        List<ChargingRequest> waitingRequests = requestRepository
+                .findByModeAndStatusOrderByCreatedAtAsc(mode, ChargingRequestStatus.WAITING);
+        for (ChargingRequest request : waitingRequests) {
+            if (request.getQueueArea() == QueueArea.RECOVERY_QUEUE
+                    || request.getQueueArea() == QueueArea.MIGRATION_QUEUE) {
+                continue;
+            }
+            markAsWaitingArea(request);
+        }
+        releaseOrphanReservedPiles(mode);
+        return triggerDispatch(mode);
+    }
+
+    @Transactional
     public List<DispatchResult> triggerDispatch(ChargeMode mode) {
         if (mode == null) {
             throw new IllegalArgumentException("Charging mode cannot be null");
@@ -147,6 +165,7 @@ public class SchedulerService {
         for (ChargingRequest request : queued) {
             request.setStatus(ChargingRequestStatus.WAITING);
             request.setAssignedPileId(null);
+            request.setAssignedAt(null);
             request.setQueueArea(QueueArea.MIGRATION_QUEUE);
             request.setQueueNumber(order++);
             requestRepository.save(request);
@@ -160,6 +179,7 @@ public class SchedulerService {
                 .orElseThrow(() -> new IllegalArgumentException("Charging request not found"));
         request.setStatus(ChargingRequestStatus.WAITING);
         request.setAssignedPileId(null);
+        request.setAssignedAt(null);
         request.setQueueArea(QueueArea.RECOVERY_QUEUE);
         request.setQueueNumber(0);
         requestRepository.save(request);
@@ -290,8 +310,11 @@ public class SchedulerService {
         request.setQueueNumber(canReserveNow ? null : waitingQueueSize(pile.getId()) + 1);
         request.setStatus(canReserveNow ? ChargingRequestStatus.ASSIGNED : ChargingRequestStatus.WAITING);
         if (canReserveNow) {
+            request.setAssignedAt(LocalDateTime.now());
             pile.setStatus(ChargingPileStatus.RESERVED);
             pileRepository.save(pile);
+        } else {
+            request.setAssignedAt(null);
         }
         requestRepository.save(request);
         renumberPileQueue(pile.getId());
@@ -307,6 +330,7 @@ public class SchedulerService {
         for (ChargingPile pile : idlePiles) {
             firstPileQueueRequest(pile.getId()).ifPresent(request -> {
                 request.setStatus(ChargingRequestStatus.ASSIGNED);
+                request.setAssignedAt(LocalDateTime.now());
                 request.setQueueNumber(null);
                 pile.setStatus(ChargingPileStatus.RESERVED);
                 requestRepository.save(request);
@@ -345,9 +369,24 @@ public class SchedulerService {
     private void markAsWaitingArea(ChargingRequest request) {
         request.setQueueArea(QueueArea.WAITING_AREA);
         request.setAssignedPileId(null);
+        request.setAssignedAt(null);
         request.setQueueNumber(null);
         request.setStatus(ChargingRequestStatus.WAITING);
         requestRepository.save(request);
+    }
+
+    private void releaseOrphanReservedPiles(ChargeMode mode) {
+        for (ChargingPile pile : pileRepository.findByModeAndEnabledTrue(mode)) {
+            if (pile.getStatus() != ChargingPileStatus.RESERVED) {
+                continue;
+            }
+            boolean hasAssigned = pileQueueRequests(pile.getId()).stream()
+                    .anyMatch(request -> request.getStatus() == ChargingRequestStatus.ASSIGNED);
+            if (!hasAssigned) {
+                pile.setStatus(ChargingPileStatus.IDLE);
+                pileRepository.save(pile);
+            }
+        }
     }
 
     private void renumberPileQueue(Long pileId) {

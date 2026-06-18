@@ -3,6 +3,9 @@ import { reactive } from 'vue';
 export const STORAGE_KEY = 'smart_charging_session';
 const LEGACY_STORAGE_KEY = 'charging_user_session';
 
+/** 按标签页隔离，同一浏览器可开多个窗口分别登录不同用户 */
+const tabStorage = sessionStorage;
+
 const EMPTY_SESSION = {
   userId: null,
   username: '',
@@ -27,13 +30,18 @@ function normalizeSession(raw) {
   };
 }
 
+function clearLegacyLocalStorage() {
+  localStorage.removeItem(STORAGE_KEY);
+  localStorage.removeItem(LEGACY_STORAGE_KEY);
+}
+
 function loadSession() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
+    const raw = tabStorage.getItem(STORAGE_KEY) || tabStorage.getItem(LEGACY_STORAGE_KEY);
     return normalizeSession(raw ? JSON.parse(raw) : null);
   } catch {
-    localStorage.removeItem(STORAGE_KEY);
-    localStorage.removeItem(LEGACY_STORAGE_KEY);
+    tabStorage.removeItem(STORAGE_KEY);
+    tabStorage.removeItem(LEGACY_STORAGE_KEY);
     return { ...EMPTY_SESSION };
   }
 }
@@ -45,14 +53,16 @@ export const authState = reactive({
 export function setSession(session) {
   const normalized = normalizeSession(session);
   authState.session = normalized;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
-  localStorage.removeItem(LEGACY_STORAGE_KEY);
+  tabStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+  tabStorage.removeItem(LEGACY_STORAGE_KEY);
+  clearLegacyLocalStorage();
 }
 
 export function clearSession() {
   authState.session = { ...EMPTY_SESSION };
-  localStorage.removeItem(STORAGE_KEY);
-  localStorage.removeItem(LEGACY_STORAGE_KEY);
+  tabStorage.removeItem(STORAGE_KEY);
+  tabStorage.removeItem(LEGACY_STORAGE_KEY);
+  clearLegacyLocalStorage();
 }
 
 export function getSession() {
