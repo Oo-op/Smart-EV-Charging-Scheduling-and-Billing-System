@@ -65,6 +65,7 @@ public class AdminService {
         dto.setActiveSessions(sessionRepository.countByStatus(ChargingSessionStatus.CHARGING));
         dto.setTodayRevenue(calculateTodayRevenue());
         dto.setPileSummary(pileSummary);
+        dto.setCapacityOverview(buildCapacityOverview());
         return dto;
     }
 
@@ -98,6 +99,9 @@ public class AdminService {
         dto.setMode(pile.getMode());
         dto.setPower(pile.getPower());
         dto.setStatus(pile.getStatus());
+        dto.setEnabled(Boolean.TRUE.equals(pile.getEnabled()));
+        dto.setOpenQueueSlots(pile.getOpenQueueSlots());
+        dto.setMaxQueueSlots(pile.getMaxQueueSlots());
         if (pile.getStatus() == ChargingPileStatus.CHARGING) {
             dto.setCurrentSession(findActiveSession(pile.getId()));
         }
@@ -126,6 +130,11 @@ public class AdminService {
         AdminQueueModeDTO dto = new AdminQueueModeDTO();
         dto.setMode(queue.getMode());
         dto.setQueueLength(queue.getQueueLength());
+        dto.setAvailablePileCount(queue.getAvailablePileCount());
+        dto.setTotalOpenQueueSlots(queue.getTotalOpenQueueSlots());
+        dto.setRemainingQueueCapacity(queue.getRemainingQueueCapacity());
+        dto.setEstimatedWaitTime(queue.getEstimatedWaitTime());
+        dto.setTemporarySimulationNote(queue.getTemporarySimulationNote());
         dto.setWaitingList(queue.getWaitingList().stream()
                 .map(this::toAdminQueueItem)
                 .toList());
@@ -144,5 +153,25 @@ public class AdminService {
 
     private BigDecimal safe(BigDecimal value) {
         return value == null ? BigDecimal.ZERO : value;
+    }
+
+    private AdminCapacityOverviewDTO buildCapacityOverview() {
+        List<ChargingPile> piles = pileRepository.findAll();
+        AdminCapacityOverviewDTO dto = new AdminCapacityOverviewDTO();
+        dto.setTotalPiles(piles.size());
+        dto.setEnabledPiles(piles.stream().filter(p -> Boolean.TRUE.equals(p.getEnabled())).count());
+        dto.setFastEnabledPiles(piles.stream()
+                .filter(p -> p.getMode() == ChargeMode.FAST && Boolean.TRUE.equals(p.getEnabled()))
+                .count());
+        dto.setSlowEnabledPiles(piles.stream()
+                .filter(p -> p.getMode() == ChargeMode.SLOW && Boolean.TRUE.equals(p.getEnabled()))
+                .count());
+        dto.setTotalOpenQueueSlots(piles.stream()
+                .mapToInt(p -> p.getOpenQueueSlots() == null ? 0 : p.getOpenQueueSlots())
+                .sum());
+        dto.setTotalMaxQueueSlots(piles.stream()
+                .mapToInt(p -> p.getMaxQueueSlots() == null ? 0 : p.getMaxQueueSlots())
+                .sum());
+        return dto;
     }
 }

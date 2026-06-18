@@ -13,4 +13,5 @@ public class AdminDashboardDTO {
     private long activeSessions;
     private BigDecimal todayRevenue;
     private PileSummaryDTO pileSummary;
+    private AdminCapacityOverviewDTO capacityOverview;
 }

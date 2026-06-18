@@ -15,4 +15,7 @@ public class PileDTO {
     private BigDecimal power;
     private ChargingPileStatus status;
     private BigDecimal serviceFee;
+    private Boolean enabled;
+    private Integer openQueueSlots;
+    private Integer maxQueueSlots;
 }

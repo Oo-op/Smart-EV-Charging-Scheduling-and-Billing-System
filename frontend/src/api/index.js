@@ -100,6 +100,10 @@ export function recoverPile(pileId) {
   return request.post(`/piles/${pileId}/recover`, {});
 }
 
+export function updatePileCapacity(pileId, payload) {
+  return request.patch(`/piles/${pileId}/capacity`, payload);
+}
+
 // ─── C：充电会话模块 ─────────────────────────────────────────
 
 export function startSession(payload) {

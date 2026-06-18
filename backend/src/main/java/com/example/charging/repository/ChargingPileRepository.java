@@ -20,7 +20,15 @@ public interface ChargingPileRepository extends JpaRepository<ChargingPile, Long
 
     List<ChargingPile> findByModeAndStatus(ChargeMode mode, ChargingPileStatus status);
 
+    List<ChargingPile> findByModeAndStatusAndEnabledTrue(ChargeMode mode, ChargingPileStatus status);
+
+    List<ChargingPile> findByModeAndEnabledTrue(ChargeMode mode);
+
     long countByModeAndStatus(ChargeMode mode, ChargingPileStatus status);
+
+    long countByModeAndStatusAndEnabledTrue(ChargeMode mode, ChargingPileStatus status);
+
+    long countByModeAndEnabledTrue(ChargeMode mode);
 
     long countByStatus(ChargingPileStatus status);
 }

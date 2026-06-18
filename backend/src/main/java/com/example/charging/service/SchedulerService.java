@@ -48,8 +48,9 @@ public class SchedulerService {
             throw new IllegalArgumentException("充电模式不能为空");
         }
 
-        ChargingPile pile = pileRepository.findByModeAndStatus(mode, ChargingPileStatus.IDLE)
+        ChargingPile pile = pileRepository.findByModeAndStatusAndEnabledTrue(mode, ChargingPileStatus.IDLE)
                 .stream()
+                .filter(this::isOpenForQueue)
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("当前模式下没有空闲充电桩"));
 
@@ -85,8 +86,9 @@ public class SchedulerService {
 
         List<ChargingRequest> waiting = requestRepository
                 .findByModeAndStatusOrderByCreatedAtAsc(mode, ChargingRequestStatus.WAITING);
-        ChargingPile referencePile = pileRepository.findByModeAndStatus(mode, ChargingPileStatus.IDLE)
+        ChargingPile referencePile = pileRepository.findByModeAndStatusAndEnabledTrue(mode, ChargingPileStatus.IDLE)
                 .stream()
+                .filter(this::isOpenForQueue)
                 .findFirst()
                 .orElse(null);
         Map<Long, Vehicle> vehicles = vehicleRepository.findAllById(
@@ -99,12 +101,18 @@ public class SchedulerService {
                 .map(request -> toQueueItem(request, vehicles.get(request.getVehicleId()), referencePile))
                 .toList();
 
-        long availablePileCount = pileRepository.countByModeAndStatus(mode, ChargingPileStatus.IDLE);
+        int totalOpenSlots = totalOpenQueueSlots(mode);
+        long availablePileCount = pileRepository.findByModeAndStatusAndEnabledTrue(mode, ChargingPileStatus.IDLE)
+                .stream()
+                .filter(this::isOpenForQueue)
+                .count();
         QueueStatusDTO dto = new QueueStatusDTO();
         dto.setAlgorithm(ALGORITHM);
         dto.setMode(mode);
         dto.setQueueLength(items.size());
         dto.setAvailablePileCount((int) availablePileCount);
+        dto.setTotalOpenQueueSlots(totalOpenSlots);
+        dto.setRemainingQueueCapacity(Math.max(0, totalOpenSlots - items.size()));
         dto.setEstimatedWaitTime(0);
         dto.setTemporarySimulationNote(TEMP_PRIORITY_NOTE);
         dto.setWaitingList(items);
@@ -163,5 +171,17 @@ public class SchedulerService {
 
     private BigDecimal safe(BigDecimal value) {
         return value == null ? BigDecimal.ZERO : value;
+    }
+
+    public int totalOpenQueueSlots(ChargeMode mode) {
+        return pileRepository.findByModeAndEnabledTrue(mode).stream()
+                .mapToInt(p -> Math.max(0, p.getOpenQueueSlots() == null ? 0 : p.getOpenQueueSlots()))
+                .sum();
+    }
+
+    private boolean isOpenForQueue(ChargingPile pile) {
+        return Boolean.TRUE.equals(pile.getEnabled())
+                && pile.getOpenQueueSlots() != null
+                && pile.getOpenQueueSlots() > 0;
     }
 }

@@ -45,6 +45,15 @@ public class ChargingPile {
     @Column(name = "service_fee", nullable = false, precision = 10, scale = 2)
     private BigDecimal serviceFee = BigDecimal.ZERO;
 
+    @Column(nullable = false)
+    private Boolean enabled = true;
+
+    @Column(name = "open_queue_slots", nullable = false)
+    private Integer openQueueSlots = 3;
+
+    @Column(name = "max_queue_slots", nullable = false)
+    private Integer maxQueueSlots = 3;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;

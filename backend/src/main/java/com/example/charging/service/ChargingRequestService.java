@@ -26,13 +26,16 @@ public class ChargingRequestService {
     private final ChargingRequestRepository requestRepository;
     private final UserRepository userRepository;
     private final VehicleRepository vehicleRepository;
+    private final SchedulerService schedulerService;
 
     public ChargingRequestService(ChargingRequestRepository requestRepository,
                                   UserRepository userRepository,
-                                  VehicleRepository vehicleRepository) {
+                                  VehicleRepository vehicleRepository,
+                                  SchedulerService schedulerService) {
         this.requestRepository = requestRepository;
         this.userRepository = userRepository;
         this.vehicleRepository = vehicleRepository;
+        this.schedulerService = schedulerService;
     }
 
     @Transactional
@@ -43,6 +46,16 @@ public class ChargingRequestService {
                 .orElseThrow(() -> new IllegalArgumentException("车辆不存在"));
         if (!vehicle.getUserId().equals(user.getId())) {
             throw new IllegalArgumentException("车辆不属于该用户");
+        }
+
+        int totalOpenQueueSlots = schedulerService.totalOpenQueueSlots(request.getMode());
+        if (totalOpenQueueSlots <= 0) {
+            throw new IllegalArgumentException("当前模式暂未开放，请联系管理员");
+        }
+        int waitingCount = requestRepository.findByModeAndStatusOrderByCreatedAtAsc(
+                request.getMode(), ChargingRequestStatus.WAITING).size();
+        if (waitingCount >= totalOpenQueueSlots) {
+            throw new IllegalArgumentException("当前模式开放的排队位置已满，请稍后再试");
         }
 
         ChargingRequest req = new ChargingRequest();

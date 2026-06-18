@@ -39,6 +39,16 @@
         <span class="stat-label">今日收入（元）</span>
         <strong class="stat-value">{{ formatMoney(dashboard.todayRevenue) }}</strong>
       </article>
+      <article v-if="dashboard.capacityOverview" class="stat-card">
+        <span class="stat-label">已开放充电桩</span>
+        <strong class="stat-value">{{ dashboard.capacityOverview.enabledPiles }}</strong>
+      </article>
+      <article v-if="dashboard.capacityOverview" class="stat-card">
+        <span class="stat-label">开放排队位置</span>
+        <strong class="stat-value">
+          {{ dashboard.capacityOverview.totalOpenQueueSlots }}/{{ dashboard.capacityOverview.totalMaxQueueSlots }}
+        </strong>
+      </article>
       <article v-if="dashboard.pileSummary" class="stat-card wide">
         <span class="stat-label">充电桩状态分布</span>
         <div class="pile-summary">
@@ -48,6 +58,29 @@
           <span>离线 {{ dashboard.pileSummary.offline }}</span>
         </div>
       </article>
+    </section>
+
+    <section v-if="dashboard?.capacityOverview" class="panel">
+      <div class="panel-head">
+        <h2>容量配置总览</h2>
+      </div>
+      <div class="capacity-summary">
+        <article>
+          <span>快充开放桩</span>
+          <strong>{{ dashboard.capacityOverview.fastEnabledPiles }}</strong>
+        </article>
+        <article>
+          <span>慢充开放桩</span>
+          <strong>{{ dashboard.capacityOverview.slowEnabledPiles }}</strong>
+        </article>
+        <article>
+          <span>总桩数</span>
+          <strong>{{ dashboard.capacityOverview.totalPiles }}</strong>
+        </article>
+      </div>
+      <p class="muted panel-note">
+        现在管理员不仅能监控故障，还能直接控制哪些桩开放，以及每个桩后允许排队的开放位置数量。
+      </p>
     </section>
 
     <section class="panel">
@@ -62,6 +95,8 @@
               <th>编号</th>
               <th>模式</th>
               <th>功率</th>
+              <th>开放状态</th>
+              <th>开放位置</th>
               <th>状态</th>
               <th>当前会话</th>
               <th>操作</th>
@@ -72,6 +107,12 @@
               <td><strong>{{ pile.code }}</strong></td>
               <td>{{ getStatusDesc('chargeMode', pile.mode) }}</td>
               <td>{{ pile.power }} kW</td>
+              <td>
+                <span class="badge" :class="pile.enabled ? 'idle' : 'offline'">
+                  {{ pile.enabled ? '开放中' : '已关闭' }}
+                </span>
+              </td>
+              <td>{{ pile.openQueueSlots }}/{{ pile.maxQueueSlots }}</td>
               <td>
                 <span class="badge" :class="statusClass(pile.status)">
                   {{ getStatusDesc('chargingPileStatus', pile.status) }}
@@ -85,6 +126,18 @@
                 <span v-else class="muted">—</span>
               </td>
               <td class="actions">
+                <button
+                  :disabled="actionPileId === pile.pileId"
+                  @click="togglePileEnabled(pile)"
+                >
+                  {{ pile.enabled ? '关闭桩位' : '开放桩位' }}
+                </button>
+                <button
+                  :disabled="actionPileId === pile.pileId"
+                  @click="updateQueueSlots(pile)"
+                >
+                  调整位置
+                </button>
                 <button
                   v-if="pile.status !== 'FAULT'"
                   class="btn-danger"
@@ -112,15 +165,21 @@
       <article class="panel">
         <div class="panel-head">
           <h2>快充队列</h2>
-          <span class="tag">{{ queue.fastQueue.queueLength }} 辆等待</span>
+          <span class="tag">{{ queue.fastQueue.queueLength }} / {{ queue.fastQueue.totalOpenQueueSlots }} 位置</span>
         </div>
+        <p class="muted queue-meta">
+          空闲桩 {{ queue.fastQueue.availablePileCount }} 台，剩余排队位置 {{ queue.fastQueue.remainingQueueCapacity }}
+        </p>
         <QueueList :items="queue.fastQueue.waitingList" />
       </article>
       <article class="panel">
         <div class="panel-head">
           <h2>慢充队列</h2>
-          <span class="tag">{{ queue.slowQueue.queueLength }} 辆等待</span>
+          <span class="tag">{{ queue.slowQueue.queueLength }} / {{ queue.slowQueue.totalOpenQueueSlots }} 位置</span>
         </div>
+        <p class="muted queue-meta">
+          空闲桩 {{ queue.slowQueue.availablePileCount }} 台，剩余排队位置 {{ queue.slowQueue.remainingQueueCapacity }}
+        </p>
         <QueueList :items="queue.slowQueue.waitingList" />
       </article>
     </section>
@@ -133,7 +192,8 @@ import {
   getAdminPiles,
   getAdminQueue,
   markPileFault,
-  recoverPile as recoverPileApi
+  recoverPile as recoverPileApi,
+  updatePileCapacity
 } from '../api';
 import { getStatusDesc } from '../api/enums';
 import QueueList from '../components/QueueList.vue';
@@ -220,6 +280,44 @@ export default {
         await this.refreshAll();
       } catch (err) {
         this.actionMessage = err.message || '恢复失败';
+      } finally {
+        this.actionPileId = null;
+      }
+    },
+    async togglePileEnabled(pile) {
+      this.actionPileId = pile.pileId;
+      this.actionMessage = '';
+      try {
+        const updated = await updatePileCapacity(pile.pileId, { enabled: !pile.enabled });
+        this.actionMessage = updated.enabled
+          ? `充电桩 ${pile.code} 已开放`
+          : `充电桩 ${pile.code} 已关闭`;
+        await this.refreshAll();
+      } catch (err) {
+        this.actionMessage = err.message || '更新开放状态失败';
+      } finally {
+        this.actionPileId = null;
+      }
+    },
+    async updateQueueSlots(pile) {
+      const input = window.prompt(
+        `请输入 ${pile.code} 的开放位置数量（固定上限 ${pile.maxQueueSlots}）`,
+        String(pile.openQueueSlots)
+      );
+      if (input === null) return;
+      const openQueueSlots = Number(input);
+      if (!Number.isInteger(openQueueSlots)) {
+        this.actionMessage = '请输入整数位置数量';
+        return;
+      }
+      this.actionPileId = pile.pileId;
+      this.actionMessage = '';
+      try {
+        const updated = await updatePileCapacity(pile.pileId, { openQueueSlots });
+        this.actionMessage = `充电桩 ${pile.code} 的开放位置已调整为 ${updated.openQueueSlots}/${updated.maxQueueSlots}`;
+        await this.refreshAll();
+      } catch (err) {
+        this.actionMessage = err.message || '更新开放位置失败';
       } finally {
         this.actionPileId = null;
       }
@@ -393,6 +491,35 @@ button:not(:disabled):hover,
   font-size: 14px;
 }
 
+.capacity-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 14px;
+}
+
+.capacity-summary article {
+  padding: 18px;
+  border-radius: 18px;
+  background: #f5f8fd;
+}
+
+.capacity-summary span {
+  display: block;
+  font-size: 13px;
+  color: #69748b;
+}
+
+.capacity-summary strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 24px;
+}
+
+.panel-note,
+.queue-meta {
+  margin: 14px 0 0;
+}
+
 .panel {
   margin-top: 24px;
   padding: 24px;
@@ -477,6 +604,7 @@ th {
 .actions button {
   padding: 6px 12px;
   font-size: 12px;
+  margin-right: 8px;
 }
 
 .action-msg {

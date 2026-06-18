@@ -14,5 +14,8 @@ public class AdminPileDTO {
     private ChargeMode mode;
     private BigDecimal power;
     private ChargingPileStatus status;
+    private Boolean enabled;
+    private Integer openQueueSlots;
+    private Integer maxQueueSlots;
     private AdminPileSessionDTO currentSession;
 }

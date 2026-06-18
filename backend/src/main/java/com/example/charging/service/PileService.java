@@ -1,5 +1,6 @@
 package com.example.charging.service;
 
+import com.example.charging.dto.AdminPileCapacityUpdateRequest;
 import com.example.charging.dto.PileDTO;
 import com.example.charging.dto.PileFaultResult;
 import com.example.charging.dto.PileRecoverResult;
@@ -45,6 +46,52 @@ public class PileService {
         return pileRepository.findAll().stream()
                 .map(this::toDto)
                 .toList();
+    }
+
+    @Transactional
+    public PileDTO updateCapacity(Long pileId, AdminPileCapacityUpdateRequest request) {
+        ChargingPile pile = pileRepository.findById(pileId)
+                .orElseThrow(() -> new IllegalArgumentException("充电桩不存在"));
+
+        if (request.getEnabled() != null && !request.getEnabled()
+                && (pile.getStatus() == ChargingPileStatus.CHARGING || pile.getStatus() == ChargingPileStatus.RESERVED)) {
+            throw new IllegalArgumentException("充电中或已分配中的充电桩不能直接关闭");
+        }
+
+        if (request.getEnabled() != null) {
+            pile.setEnabled(request.getEnabled());
+            if (request.getEnabled()) {
+                if (pile.getStatus() == ChargingPileStatus.OFFLINE) {
+                    pile.setStatus(ChargingPileStatus.IDLE);
+                }
+                if (safeInt(pile.getOpenQueueSlots(), 0) == 0) {
+                    pile.setOpenQueueSlots(1);
+                }
+            } else {
+                pile.setOpenQueueSlots(0);
+                if (pile.getStatus() == ChargingPileStatus.IDLE) {
+                    pile.setStatus(ChargingPileStatus.OFFLINE);
+                }
+            }
+        }
+
+        if (request.getOpenQueueSlots() != null) {
+            int maxSlots = safeInt(pile.getMaxQueueSlots(), 0);
+            int openSlots = request.getOpenQueueSlots();
+            if (openSlots < 0 || openSlots > maxSlots) {
+                throw new IllegalArgumentException("开放位置数量必须在 0 到固定上限之间");
+            }
+            pile.setOpenQueueSlots(openSlots);
+            pile.setEnabled(openSlots > 0);
+            if (openSlots > 0 && pile.getStatus() == ChargingPileStatus.OFFLINE) {
+                pile.setStatus(ChargingPileStatus.IDLE);
+            }
+            if (openSlots == 0 && pile.getStatus() == ChargingPileStatus.IDLE) {
+                pile.setStatus(ChargingPileStatus.OFFLINE);
+            }
+        }
+
+        return toDto(pileRepository.save(pile));
     }
 
     @Transactional
@@ -143,10 +190,17 @@ public class PileService {
         dto.setPower(pile.getPower());
         dto.setStatus(pile.getStatus());
         dto.setServiceFee(pile.getServiceFee());
+        dto.setEnabled(Boolean.TRUE.equals(pile.getEnabled()));
+        dto.setOpenQueueSlots(safeInt(pile.getOpenQueueSlots(), 0));
+        dto.setMaxQueueSlots(safeInt(pile.getMaxQueueSlots(), 0));
         return dto;
     }
 
     private BigDecimal safe(BigDecimal value) {
         return value == null ? BigDecimal.ZERO : value;
+    }
+
+    private int safeInt(Integer value, int fallback) {
+        return value == null ? fallback : value;
     }
 }

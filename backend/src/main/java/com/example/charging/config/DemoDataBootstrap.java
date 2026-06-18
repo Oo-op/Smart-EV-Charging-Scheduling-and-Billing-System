@@ -72,6 +72,25 @@ public class DemoDataBootstrap implements ApplicationRunner {
             createPile(stationId, "SLOW-3", ChargeMode.SLOW, slowPower, serviceFee);
         }
 
+        pileRepository.findAll().forEach(pile -> {
+            boolean changed = false;
+            if (pile.getMaxQueueSlots() == null || pile.getMaxQueueSlots() <= 0) {
+                pile.setMaxQueueSlots(chargingProperties.getQueue().getPileCapacity());
+                changed = true;
+            }
+            if (pile.getOpenQueueSlots() == null || pile.getOpenQueueSlots() < 0) {
+                pile.setOpenQueueSlots(pile.getMaxQueueSlots());
+                changed = true;
+            }
+            if (pile.getEnabled() == null) {
+                pile.setEnabled(pile.getOpenQueueSlots() > 0);
+                changed = true;
+            }
+            if (changed) {
+                pileRepository.save(pile);
+            }
+        });
+
         if (priceRepository.count() == 0) {
             BigDecimal serviceFee = chargingProperties.getPrice().getService();
             List<Object[]> rows = Arrays.asList(
@@ -117,6 +136,9 @@ public class DemoDataBootstrap implements ApplicationRunner {
         pile.setPower(new BigDecimal(power));
         pile.setStatus(ChargingPileStatus.IDLE);
         pile.setServiceFee(new BigDecimal(serviceFee));
+        pile.setEnabled(true);
+        pile.setMaxQueueSlots(chargingProperties.getQueue().getPileCapacity());
+        pile.setOpenQueueSlots(chargingProperties.getQueue().getPileCapacity());
         pileRepository.save(pile);
     }
 }

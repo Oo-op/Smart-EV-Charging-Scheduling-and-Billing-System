@@ -12,6 +12,8 @@ public class QueueStatusDTO {
     private ChargeMode mode;
     private int queueLength;
     private int availablePileCount;
+    private int totalOpenQueueSlots;
+    private int remainingQueueCapacity;
     private int estimatedWaitTime;
     private String temporarySimulationNote;
     private List<QueueItemDTO> waitingList;
