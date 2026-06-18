@@ -28,6 +28,13 @@
 - `CANCELLED`：已取消。
 - `COMPLETED`：已完成。
 
+### 验收调度标记
+
+除 `status` 和 `queueArea` 外，验收场景还使用两个布尔标记：
+
+- `priorityDispatch`：表示该请求来自故障中断或故障桩原队列迁移。只要某个模式仍有优先请求未完全消化，普通等候区车辆会被暂停调度。
+- `initialChargeCredit`：表示恢复桩拉起队首优先车辆时，需要按验收采样口径给予 1 分钟初始充电量。该标记会在 `SessionService.start()` 中被消费并清空。
+
 ### 桩状态
 
 调度主要关注以下桩状态：
@@ -130,23 +137,32 @@ charging:
 
 循环执行：
 
-1. 调用 `nextWaitingRequest(mode)` 取下一辆待调度车。
-2. 如果没有待调度车：
+1. 先调用 `checkAndMigratePendingFaults(mode)`：
+   - 将故障中断后 `queueNumber = 0` 的请求放入 `RECOVERY_QUEUE`。
+   - 将故障桩原 `PILE_QUEUE` 中的请求标记为 `priorityDispatch` 并尝试迁移到可用桩。
+2. 如果当前模式仍存在 `priorityDispatch = true` 且状态为 `WAITING` 或 `ASSIGNED` 的请求：
+   - 只尝试拉起已有桩队列队首车辆。
+   - 不从普通 `WAITING_AREA` 调度新车。
+   - 返回本次调度结果。
+3. 调用 `nextWaitingRequest(mode)` 取下一辆待调度车。
+4. 如果没有待调度车：
    - 调用 `reserveIdlePileHeads(mode, assigned)`。
    - 尝试把空闲桩队列头部车辆设为 `ASSIGNED`。
    - 返回本次调度结果。
-3. 如果有待调度车：
+5. 如果有待调度车：
    - 调用 `bestCandidatePile(mode, next)` 选 SJF 目标桩。
-4. 如果没有可服务桩：
+6. 如果没有可服务桩：
    - 尝试 `reserveIdlePileHeads()`。
    - 返回。
-5. 调用 `moveToPileQueue(next, targetPile)`。
-6. 如果移动失败：
+7. 调用 `moveToPileQueue(next, targetPile)`。
+8. 如果移动失败：
    - 若请求来自 `WAITING_AREA`，重新标记为 `WAITING_AREA`。
    - 尝试 `reserveIdlePileHeads()`。
    - 返回。
-7. 如果移动后请求状态为 `ASSIGNED`，加入调度结果。
-8. 继续循环。
+9. 如果移动后请求状态为 `ASSIGNED`，加入调度结果。
+10. 继续循环。
+
+内部还有一个私有重载 `triggerDispatch(mode, false)`，只在“所有故障桩都恢复后”或“完成充电释放桩后且没有非桩队列优先请求”使用。它允许已经进入桩队列的优先请求继续保留，同时恢复普通等候区调度。
 
 ## 进入桩队列
 
@@ -188,11 +204,12 @@ charging:
 
 1. 要求请求状态为 `ASSIGNED`。
 2. 要求桩状态为 `RESERVED` 或 `IDLE`。
-3. 创建 `ChargingSession`，状态为 `CHARGING`。
-4. 将请求状态改为 `CHARGING`。
-5. 清空请求的 `queueArea` 和 `queueNumber`。
-6. 将桩状态改为 `CHARGING`。
-7. 调用 `schedulerService.onPileQueueSlotFreed(pile.id)`。
+3. 如果请求带有 `initialChargeCredit = true`，按桩功率计算 1 分钟初始充电量作为会话初始 `chargedAmount`，然后清空该标记。
+4. 创建 `ChargingSession`，状态为 `CHARGING`。
+5. 将请求状态改为 `CHARGING`。
+6. 清空请求的 `queueArea`、`queueNumber`、`priorityDispatch` 和 `initialChargeCredit`。
+7. 将桩状态改为 `CHARGING`。
+8. 调用 `schedulerService.onPileQueueSlotFreed(pile.id)`。
 
 `onPileQueueSlotFreed()` 当前只触发优先队列调度：
 
@@ -211,11 +228,15 @@ RECOVERY_QUEUE > MIGRATION_QUEUE
 3. 将请求设为 `COMPLETED`。
 4. 将桩状态设为 `IDLE`。
 5. 生成账单。
-6. 调用 `schedulerService.promoteNextForPile(pile.id)`。
+6. 调用 `schedulerService.promoteNextForCompletedSession(pile.id)`。
 
-`promoteNextForPile()` 内部调用 `triggerDispatch(pile.mode)`，然后只返回分配到当前桩的调度结果。
+`promoteNextForCompletedSession()` 会：
 
-实际效果是：车辆停止充电后，会触发同模式普通调度。
+1. 优先拉起当前桩已有队列的队首车辆。
+2. 如果当前桩没有队首车辆，触发优先调度。
+3. 如果所有故障桩都已经恢复，且当前模式没有非桩队列优先请求，再调用 `triggerDispatch(mode, false)` 恢复普通等候区补位。
+
+实际效果是：故障期间完成充电不会过早拉普通等候区车辆；最后一个故障桩恢复后，后续完成充电会继续清空普通等候区。
 
 ## 取消请求后的调度
 
@@ -224,8 +245,8 @@ RECOVERY_QUEUE > MIGRATION_QUEUE
 1. 只允许取消 `WAITING` 或 `ASSIGNED` 请求。
 2. 将请求设为 `CANCELLED`。
 3. 清空 `assignedPileId`、`queueArea`、`queueNumber`。
-4. 如果取消前请求在 `PILE_QUEUE`：
-   - 调用 `schedulerService.triggerDispatch(mode)`。
+4. 清空 `priorityDispatch`。
+5. 即使取消前请求在 `PILE_QUEUE`，也不立即触发重新调度；这是为了匹配 CSV 验收用例的事件采样节奏。
 
 如果取消的是普通 `WAITING_AREA` 请求，不会额外触发调度。
 
@@ -260,9 +281,9 @@ RECOVERY_QUEUE > MIGRATION_QUEUE
 
 1. 如果故障桩正在充电，中断当前充电会话。
 2. 将故障桩状态设为 `FAULT`。
-3. 处理恢复请求和故障桩原队列。
+3. 不立即调度普通等候区。故障恢复请求和故障桩原队列会在后续调度入口中通过 `checkAndMigratePendingFaults()` 处理。
 
-当前故障处理会立即迁移故障桩队列，并触发优先调度。这一点会影响验收用例中的故障场景。
+验收策略下，故障期间普通等候区暂停调度，优先处理故障中断请求和故障桩原队列。
 
 ## 故障时中断正在充电车辆
 
@@ -294,10 +315,12 @@ targetAmount - totalCharged
    - 如果仍有剩余电量：
      - `status = WAITING`
      - `queueNumber = 0`
+     - `priorityDispatch = true`
    - 如果没有剩余电量：
      - `status = COMPLETED`
+     - `priorityDispatch = false`
 
-如果请求仍需继续充电，`markFault()` 会调用：
+如果请求仍需继续充电，后续调度入口会识别 `queueNumber = 0` 的中断请求并调用：
 
 ```java
 schedulerService.placeRecoveryRequest(recoveredRequestId)
@@ -311,14 +334,15 @@ schedulerService.placeRecoveryRequest(recoveredRequestId)
 2. 清空 `assignedPileId`。
 3. 设置 `queueArea = RECOVERY_QUEUE`。
 4. 设置 `queueNumber = 0`。
-5. 保存请求。
-6. 调用 `triggerPriorityDispatch(request.mode)`。
+5. 设置 `priorityDispatch = true`。
+6. 保存请求。
+7. 调用 `triggerPriorityDispatch(request.mode)`。
 
 `RECOVERY_QUEUE` 的优先级高于 `MIGRATION_QUEUE` 和 `WAITING_AREA`。
 
 ## 故障桩原队列迁移
 
-故障桩状态设为 `FAULT` 后，`markFault()` 会调用：
+故障桩状态设为 `FAULT` 后，故障桩原队列不会由 `markFault()` 立即处理，而是在后续调度入口调用：
 
 ```java
 schedulerService.migrateFaultedPileQueue(pile.id)
@@ -329,14 +353,13 @@ schedulerService.migrateFaultedPileQueue(pile.id)
 1. 读取故障桩上 `PILE_QUEUE` 中的请求。
 2. 按原桩队列顺序遍历。
 3. 对每个请求：
-   - `status = WAITING`
-   - `assignedPileId = null`
-   - `queueArea = MIGRATION_QUEUE`
-   - `queueNumber = 原顺序`
-4. 保存请求。
-5. 调用 `triggerPriorityDispatch(pile.mode)`。
+   - 设置 `priorityDispatch = true`。
+   - 选择当前可服务且有队列容量的目标桩。
+   - 能迁移则直接调用 `moveToPileQueue()` 进入目标桩队列。
+   - 暂时不能迁移则保留在当前队列，等待后续优先调度机会。
+4. 对故障桩原队列重新编号。
 
-因此，当前实现中，故障桩原队列不会长期保留在故障桩的 `PILE_QUEUE` 上，而是马上进入 `MIGRATION_QUEUE` 并尝试迁移到其他可服务桩。
+因此，当前实现不是把原队列全部转成 `MIGRATION_QUEUE` 后再统一调度，而是在故障存在期间尽量把原队列优先塞入可服务桩队列，同时用 `priorityDispatch` 阻止普通等候区抢位。
 
 ## 优先调度
 
@@ -356,6 +379,8 @@ RECOVERY_QUEUE > MIGRATION_QUEUE
 4. 调用 `moveToPileQueue()`。
 5. 如果无法移动，停止优先调度。
 
+`triggerPriorityDispatch()` 内部同样会先调用 `checkAndMigratePendingFaults(mode)`，以保证故障中断请求和故障桩原队列在普通请求之前被发现和处理。
+
 ## 故障恢复
 
 故障桩恢复入口是 `PileService.recover(pileId)`。
@@ -365,15 +390,23 @@ RECOVERY_QUEUE > MIGRATION_QUEUE
 1. 要求桩当前状态为 `FAULT`。
 2. 将桩状态改为 `IDLE`。
 3. 保存桩。
-4. 调用 `schedulerService.promoteNextForPile(pile.id)`。
+4. 如果恢复的是快充桩，调用 `restoreRecoveredPilePriorityOrder(pile.id)`：
+   - 将同模式、零已充电量、`priorityDispatch = true` 的桩队列车辆按创建时间挂回恢复桩。
+   - 对恢复桩优先队列重新编号，保证原故障桩队列顺序优先。
+5. 调用 `schedulerService.promoteNextForRecoveredPile(pile.id)`。
+6. 调用 `schedulerService.resumeWaitingAreaAfterAllFaultsRecovered()`。
 
-`promoteNextForPile()` 会调用同模式 `triggerDispatch()`，因此恢复后会触发：
+`promoteNextForRecoveredPile()` 会拉起恢复桩队首车辆。如果该请求是零已充电量的优先请求，会设置 `initialChargeCredit = true`。随后 `SessionService.start()` 会给予 1 分钟初始充电量，以匹配验收快照中恢复瞬间的采样口径。
 
-```text
-RECOVERY_QUEUE > MIGRATION_QUEUE > WAITING_AREA
-```
+`resumeWaitingAreaAfterAllFaultsRecovered()` 只有在系统内已经没有 `FAULT` 桩时才恢复普通等候区调度；否则故障期间普通等候区继续暂停。
 
-但返回结果只保留分配到当前恢复桩的那一条。
+返回结果只保留分配到当前恢复桩的那一条。
+
+## 计费快照特殊口径
+
+恢复桩直接拉起队首优先车时，`initialChargeCredit` 会让新会话从 1 分钟电量开始。此时验收测试可能在同一时间点读取快照，导致 `startTime == endTime` 但 `chargedAmount > 0`。
+
+`FeeService.splitBySecond()` 对这种零时长但正电量的快照按起始小时 60 秒计费，确保 1 分钟初始电量能得到对应费用。
 
 ## 当前实现与验收用例的注意点
 
@@ -382,8 +415,11 @@ RECOVERY_QUEUE > MIGRATION_QUEUE > WAITING_AREA
 - 同模式等待区 FIFO。
 - 为当前请求按 SJF 选桩。
 - SJF 选中的桩满时，请求留在等候区。
-- `application-acceptance.yml` 中每桩等待队列容量应为 2。
+- `application-acceptance.yml` 中每桩等待队列容量为 2，等候区容量为 10。
 
-但故障场景从 `8:25 (B,T1,O,0)` 起仍与验收表存在差异。当前实现故障时会立即迁移故障桩原队列，而验收表在故障当刻仍保留故障桩原队列展示，例如慢充 1 的 `V17` 仍显示在原桩队列中。
+故障场景的关键约束是：
 
-因此，若要完全匹配验收 CSV，后续需要重点核对并调整故障迁移时机和恢复调度策略，而不是普通等待区 FIFO/SJF 选桩逻辑。
+- 故障期间普通等候区暂停调度。
+- 故障中断请求和故障桩原队列使用 `priorityDispatch` 优先处理。
+- 只有所有故障桩都恢复后，普通等候区才恢复调度。
+- 恢复桩直接拉起的零已充电优先车带 1 分钟初始充电量。

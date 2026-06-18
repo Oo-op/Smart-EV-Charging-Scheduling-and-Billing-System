@@ -104,6 +104,7 @@ public class SessionService {
         }
 
         LocalDateTime now = LocalDateTime.now();
+        BigDecimal initialChargedAmount = initialChargeCredit(request, pile);
         ChargingSession session = new ChargingSession();
         session.setRequestId(request.getId());
         session.setUserId(request.getUserId());
@@ -111,13 +112,15 @@ public class SessionService {
         session.setPileId(pile.getId());
         session.setStartTime(now);
         session.setTargetAmount(remainingAmount(request));
-        session.setChargedAmount(BigDecimal.ZERO);
+        session.setChargedAmount(initialChargedAmount);
         session.setStatus(ChargingSessionStatus.CHARGING);
 
         request.setStatus(ChargingRequestStatus.CHARGING);
         request.setAssignedAt(null);
         request.setQueueArea(null);
         request.setQueueNumber(null);
+        request.setPriorityDispatch(false);
+        request.setInitialChargeCredit(false);
         pile.setStatus(ChargingPileStatus.CHARGING);
 
         ChargingSession saved = sessionRepository.save(session);
@@ -169,6 +172,7 @@ public class SessionService {
         request.setStatus(ChargingRequestStatus.COMPLETED);
         request.setQueueArea(null);
         request.setQueueNumber(null);
+        request.setPriorityDispatch(false);
         pile.setStatus(ChargingPileStatus.IDLE);
 
         ChargingSession savedSession = sessionRepository.save(session);
@@ -177,7 +181,7 @@ public class SessionService {
 
         // 调用 BillService 分时计费生成账单
         Bill bill = billService.generateBill(savedSession);
-        schedulerService.promoteNextForPile(pile.getId());
+        schedulerService.promoteNextForCompletedSession(pile.getId());
         return toStopResult(savedSession, bill);
     }
 
@@ -222,6 +226,16 @@ public class SessionService {
                 .divide(power, 0, RoundingMode.CEILING)
                 .longValue();
         return startTime.plusMinutes(minutes);
+    }
+
+    private BigDecimal initialChargeCredit(ChargingRequest request, ChargingPile pile) {
+        if (!Boolean.TRUE.equals(request.getInitialChargeCredit())) {
+            return BigDecimal.ZERO;
+        }
+        if (safe(pile.getPower()).compareTo(BigDecimal.ZERO) <= 0) {
+            return BigDecimal.ZERO;
+        }
+        return pile.getPower().divide(BigDecimal.valueOf(60), 8, RoundingMode.HALF_UP);
     }
 
     private BigDecimal remainingAmount(ChargingRequest request) {

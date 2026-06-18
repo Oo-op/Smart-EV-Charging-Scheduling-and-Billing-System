@@ -90,6 +90,8 @@ CREATE TABLE charging_request (
     queue_number INT,
     queue_area VARCHAR(30),
     assigned_pile_id BIGINT,
+    priority_dispatch BOOLEAN NOT NULL DEFAULT FALSE,
+    initial_charge_credit BOOLEAN NOT NULL DEFAULT FALSE,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_user (user_id),

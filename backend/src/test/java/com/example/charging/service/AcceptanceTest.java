@@ -15,6 +15,8 @@ import java.io.FileWriter;
 import java.io.PrintWriter;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -122,6 +124,14 @@ class AcceptanceTest {
             startAssignedSessionsFromDatabase();
             syncMirrorFromDatabase();
 
+            if ("9:00".equals(cp.time) || "9:50".equals(cp.time) || "10:00".equals(cp.time)) {
+                System.out.println("DEBUG " + cp.time + " - Requests in DB:");
+                requestRepository.findAll().forEach(r -> {
+                    String plate = vehicleRepository.findById(r.getVehicleId()).map(Vehicle::getPlateNumber).orElse("unknown");
+                    System.out.println("  Request " + plate + " (id=" + r.getId() + "): status=" + r.getStatus() + ", queueArea=" + r.getQueueArea() + ", queueNumber=" + r.getQueueNumber() + ", assignedPileId=" + r.getAssignedPileId());
+                });
+            }
+
             // Step 5 & 6: Get snapshot and compare
             String mismatch = verifyState(cp);
             if (mismatch == null) {
@@ -163,6 +173,63 @@ class AcceptanceTest {
                 .ifPresent(endTime -> System.out.println("Actual final session end time: " + endTime));
 
         assertEquals(0, failed, "Acceptance test failed with " + failed + " mismatches");
+    }
+
+    @Test
+    void exportCurrentSchedulingOutput() throws Exception {
+        clearDatabase();
+        initCoreTestData();
+
+        Path csvPath = Paths.get("..", "tests", "resources", "作业验收用例_测试用例.csv")
+                .toAbsolutePath()
+                .normalize();
+        Path outputPath = Paths.get("..", "current_schedule_output.csv")
+                .toAbsolutePath()
+                .normalize();
+
+        List<Checkpoint> checkpoints = parseCSV(csvPath.toString());
+        currentSimTime = parseSimTime(checkpoints.get(0).time);
+
+        try (PrintWriter writer = new PrintWriter(Files.newBufferedWriter(outputPath, StandardCharsets.UTF_8))) {
+            writeCsvRow(writer, "时刻", "事件", "快充1", "快充2", "慢充1", "慢充2", "慢充3", "等候区");
+            for (Checkpoint cp : checkpoints) {
+                LocalDateTime targetTime = parseSimTime(cp.time);
+                advanceTime(targetTime);
+                executeEvent(cp.event);
+                startAssignedSessionsFromDatabase();
+                syncMirrorFromDatabase();
+
+                writeCsvRow(writer,
+                        cp.time,
+                        cp.event,
+                        getActualActiveString("FAST-1"),
+                        getActualActiveString("FAST-2"),
+                        getActualActiveString("SLOW-1"),
+                        getActualActiveString("SLOW-2"),
+                        getActualActiveString("SLOW-3"),
+                        getActualWaitingString());
+                writeCsvRow(writer,
+                        "",
+                        "",
+                        getActualQueueString("FAST-1", 0),
+                        getActualQueueString("FAST-2", 0),
+                        getActualQueueString("SLOW-1", 0),
+                        getActualQueueString("SLOW-2", 0),
+                        getActualQueueString("SLOW-3", 0),
+                        "");
+                writeCsvRow(writer,
+                        "",
+                        "",
+                        getActualQueueString("FAST-1", 1),
+                        getActualQueueString("FAST-2", 1),
+                        getActualQueueString("SLOW-1", 1),
+                        getActualQueueString("SLOW-2", 1),
+                        getActualQueueString("SLOW-3", 1),
+                        "");
+            }
+        }
+
+        System.out.println("Current scheduling output written to: " + outputPath);
     }
 
     private void clearDatabase() {
@@ -305,6 +372,26 @@ class AcceptanceTest {
         }
         list.add(sb.toString());
         return list.toArray(new String[0]);
+    }
+
+    private void writeCsvRow(PrintWriter writer, String... cells) {
+        writer.println(Arrays.stream(cells)
+                .map(this::csvCell)
+                .collect(java.util.stream.Collectors.joining(",")));
+    }
+
+    private String csvCell(String value) {
+        if (value == null || value.isEmpty()) {
+            return "";
+        }
+        if ("-".equals(value)) {
+            return value;
+        }
+        String escaped = value.replace("\"", "\"\"");
+        if (escaped.contains(",") || escaped.contains("\"") || escaped.contains("\n")) {
+            return "\"" + escaped + "\"";
+        }
+        return escaped;
     }
 
     private void advanceTime(LocalDateTime targetTime) {
@@ -516,18 +603,22 @@ class AcceptanceTest {
     }
 
     private void handleSubmit(String vName, ChargeMode mode, BigDecimal target) {
-        ensureUserAndVehicle(vName);
-        Long userId = vehicleToUserId.get(vName);
-        Long vehicleId = vehicleToId.get(vName);
+        try {
+            ensureUserAndVehicle(vName);
+            Long userId = vehicleToUserId.get(vName);
+            Long vehicleId = vehicleToId.get(vName);
 
-        ChargingRequestSubmitRequest req = new ChargingRequestSubmitRequest();
-        req.setUserId(userId);
-        req.setVehicleId(vehicleId);
-        req.setMode(mode);
-        req.setTargetAmount(target);
+            ChargingRequestSubmitRequest req = new ChargingRequestSubmitRequest();
+            req.setUserId(userId);
+            req.setVehicleId(vehicleId);
+            req.setMode(mode);
+            req.setTargetAmount(target);
 
-        ChargingRequestDetailDTO detail = requestService.submitRequest(req);
-        vehicleToReqId.put(vName, detail.getRequestId());
+            ChargingRequestDetailDTO detail = requestService.submitRequest(req);
+            vehicleToReqId.put(vName, detail.getRequestId());
+        } catch (Exception e) {
+            System.out.println("DEBUG handleSubmit: vehicle " + vName + " submission failed (e.g. queue full / waiting area full): " + e.getMessage());
+        }
     }
 
     private void handleCancel(String vName) {

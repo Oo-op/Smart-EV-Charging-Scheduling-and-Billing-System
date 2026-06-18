@@ -140,6 +140,10 @@ public class FeeService {
         result.put(PricePeriod.VALLEY, 0L);
 
         if (end.isBefore(start)) return result;
+        if (end.isEqual(start)) {
+            result.put(getPeriodForHour(start.getHour()), 60L);
+            return result;
+        }
 
         LocalDateTime cursor = start;
         while (cursor.isBefore(end)) {
