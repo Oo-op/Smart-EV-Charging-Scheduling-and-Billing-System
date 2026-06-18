@@ -1,5 +1,6 @@
 package com.example.charging.service;
 
+import com.example.charging.config.ChargingProperties;
 import com.example.charging.dto.ChargingRequestDetailDTO;
 import com.example.charging.dto.ChargingRequestModifyRequest;
 import com.example.charging.dto.ChargingRequestSubmitRequest;
@@ -28,15 +29,18 @@ public class ChargingRequestService {
     private final UserRepository userRepository;
     private final VehicleRepository vehicleRepository;
     private final SchedulerService schedulerService;
+    private final ChargingProperties chargingProperties;
 
     public ChargingRequestService(ChargingRequestRepository requestRepository,
                                   UserRepository userRepository,
                                   VehicleRepository vehicleRepository,
-                                  SchedulerService schedulerService) {
+                                  SchedulerService schedulerService,
+                                  ChargingProperties chargingProperties) {
         this.requestRepository = requestRepository;
         this.userRepository = userRepository;
         this.vehicleRepository = vehicleRepository;
         this.schedulerService = schedulerService;
+        this.chargingProperties = chargingProperties;
     }
 
     @Transactional
@@ -68,6 +72,18 @@ public class ChargingRequestService {
         ChargingRequest saved = requestRepository.save(req);
         schedulerService.triggerDispatch(saved.getMode());
         saved = requestRepository.findById(saved.getId()).orElseThrow();
+
+        if (saved.getStatus() == ChargingRequestStatus.WAITING
+                && saved.getQueueArea() == QueueArea.WAITING_AREA) {
+            long waitingInAreaCount = requestRepository.findAll().stream()
+                    .filter(r -> r.getStatus() == ChargingRequestStatus.WAITING)
+                    .filter(r -> r.getQueueArea() == QueueArea.WAITING_AREA)
+                    .count();
+            if (waitingInAreaCount > chargingProperties.getQueue().getWaitingAreaCapacity()) {
+                throw new IllegalArgumentException("Waiting area is full");
+            }
+        }
+
         return toDetailDto(saved, vehicle.getPlateNumber());
     }
 
@@ -108,9 +124,10 @@ public class ChargingRequestService {
         request.setAssignedPileId(null);
         request.setQueueArea(null);
         request.setQueueNumber(null);
+        request.setPriorityDispatch(false);
         ChargingRequest saved = requestRepository.save(request);
         if (previousArea == QueueArea.PILE_QUEUE) {
-            schedulerService.triggerDispatch(mode);
+            // Cancel does not trigger immediate dispatch in CSV scheduling rules
         }
         return toDetailDto(saved, resolvePlateNumber(saved.getVehicleId()));
     }

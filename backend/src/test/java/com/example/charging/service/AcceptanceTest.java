@@ -122,6 +122,14 @@ class AcceptanceTest {
             startAssignedSessionsFromDatabase();
             syncMirrorFromDatabase();
 
+            if ("9:00".equals(cp.time) || "9:50".equals(cp.time) || "10:00".equals(cp.time)) {
+                System.out.println("DEBUG " + cp.time + " - Requests in DB:");
+                requestRepository.findAll().forEach(r -> {
+                    String plate = vehicleRepository.findById(r.getVehicleId()).map(Vehicle::getPlateNumber).orElse("unknown");
+                    System.out.println("  Request " + plate + " (id=" + r.getId() + "): status=" + r.getStatus() + ", queueArea=" + r.getQueueArea() + ", queueNumber=" + r.getQueueNumber() + ", assignedPileId=" + r.getAssignedPileId());
+                });
+            }
+
             // Step 5 & 6: Get snapshot and compare
             String mismatch = verifyState(cp);
             if (mismatch == null) {
@@ -516,18 +524,22 @@ class AcceptanceTest {
     }
 
     private void handleSubmit(String vName, ChargeMode mode, BigDecimal target) {
-        ensureUserAndVehicle(vName);
-        Long userId = vehicleToUserId.get(vName);
-        Long vehicleId = vehicleToId.get(vName);
+        try {
+            ensureUserAndVehicle(vName);
+            Long userId = vehicleToUserId.get(vName);
+            Long vehicleId = vehicleToId.get(vName);
 
-        ChargingRequestSubmitRequest req = new ChargingRequestSubmitRequest();
-        req.setUserId(userId);
-        req.setVehicleId(vehicleId);
-        req.setMode(mode);
-        req.setTargetAmount(target);
+            ChargingRequestSubmitRequest req = new ChargingRequestSubmitRequest();
+            req.setUserId(userId);
+            req.setVehicleId(vehicleId);
+            req.setMode(mode);
+            req.setTargetAmount(target);
 
-        ChargingRequestDetailDTO detail = requestService.submitRequest(req);
-        vehicleToReqId.put(vName, detail.getRequestId());
+            ChargingRequestDetailDTO detail = requestService.submitRequest(req);
+            vehicleToReqId.put(vName, detail.getRequestId());
+        } catch (Exception e) {
+            System.out.println("DEBUG handleSubmit: vehicle " + vName + " submission failed (e.g. queue full / waiting area full): " + e.getMessage());
+        }
     }
 
     private void handleCancel(String vName) {

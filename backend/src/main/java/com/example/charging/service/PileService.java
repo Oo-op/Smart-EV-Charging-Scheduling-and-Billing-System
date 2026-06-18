@@ -7,6 +7,7 @@ import com.example.charging.dto.PileRecoverResult;
 import com.example.charging.entity.ChargingPile;
 import com.example.charging.entity.ChargingRequest;
 import com.example.charging.entity.ChargingSession;
+import com.example.charging.enums.ChargeMode;
 import com.example.charging.enums.ChargingPileStatus;
 import com.example.charging.enums.ChargingRequestStatus;
 import com.example.charging.enums.ChargingSessionStatus;
@@ -103,16 +104,11 @@ public class PileService {
         pile.setStatus(ChargingPileStatus.FAULT);
         pileRepository.save(pile);
 
-        if (result.getRecoveredRequestId() != null && result.getRequestStatus() == ChargingRequestStatus.WAITING) {
-            schedulerService.placeRecoveryRequest(result.getRecoveredRequestId());
-        }
-        schedulerService.migrateFaultedPileQueue(pile.getId());
-
         result.setPileId(pile.getId());
         result.setStatus(pile.getStatus());
         result.setFaultReason(faultReason);
         result.setTemporarySimulation(false);
-        result.setTemporarySimulationNote("Fault handling migrated active recovery request first, then original pile queue before waiting area.");
+        result.setTemporarySimulationNote("Fault handling will be migrated during the next scheduling step.");
         return result;
     }
 
@@ -126,13 +122,17 @@ public class PileService {
 
         pile.setStatus(ChargingPileStatus.IDLE);
         pileRepository.save(pile);
+        if (pile.getMode() == ChargeMode.FAST) {
+            schedulerService.restoreRecoveredPilePriorityOrder(pile.getId());
+        }
 
         PileRecoverResult result = new PileRecoverResult();
         result.setPileId(pile.getId());
         result.setStatus(pile.getStatus());
         result.setTemporarySimulation(false);
         result.setTemporarySimulationNote("Recovered pile promotes its own queue, then recovery/migration queues, then waiting area.");
-        result.setDispatchResult(schedulerService.promoteNextForPile(pile.getId()));
+        result.setDispatchResult(schedulerService.promoteNextForRecoveredPile(pile.getId()));
+        schedulerService.resumeWaitingAreaAfterAllFaultsRecovered();
         return result;
     }
 
@@ -161,8 +161,10 @@ public class PileService {
         if (remaining.compareTo(BigDecimal.ZERO) > 0) {
             request.setStatus(ChargingRequestStatus.WAITING);
             request.setQueueNumber(0);
+            request.setPriorityDispatch(true);
         } else {
             request.setStatus(ChargingRequestStatus.COMPLETED);
+            request.setPriorityDispatch(false);
         }
 
         sessionRepository.save(session);

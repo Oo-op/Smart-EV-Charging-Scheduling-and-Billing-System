@@ -127,6 +127,7 @@ class SchedulerAndFaultFlowTest {
         ChargingRequest nextWaitingRequest = saveRequest(22L, 22L, ChargeMode.SLOW, "5.00");
 
         pileService.markFault(faultedPile.getId(), "test fault", BigDecimal.ZERO);
+        schedulerService.triggerPriorityDispatch(ChargeMode.SLOW);
 
         ChargingRequest migrated = requestRepository.findById(migrationRequest.getId()).orElseThrow();
         ChargingRequest waiting = requestRepository.findById(waitingRequest.getId()).orElseThrow();
