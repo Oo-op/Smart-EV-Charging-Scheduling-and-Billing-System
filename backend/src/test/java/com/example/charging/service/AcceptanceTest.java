@@ -156,6 +156,11 @@ class AcceptanceTest {
             System.out.println("First Failure: " + firstFailure.time + " | " + firstFailure.event);
             System.out.println("Mismatch detail:\n" + mismatchReports.get(0));
         }
+        sessionRepository.findAll().stream()
+                .map(ChargingSession::getEndTime)
+                .filter(Objects::nonNull)
+                .max(Comparator.naturalOrder())
+                .ifPresent(endTime -> System.out.println("Actual final session end time: " + endTime));
 
         assertEquals(0, failed, "Acceptance test failed with " + failed + " mismatches");
     }

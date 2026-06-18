@@ -11,7 +11,7 @@ charging:
     fast: 2
     slow: 3
   queue:
-    pile-capacity: 3
+    pile-capacity: 2
     waiting-area-capacity: 10
   peak-hours:
     - 10

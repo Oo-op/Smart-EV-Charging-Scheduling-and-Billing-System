@@ -249,9 +249,7 @@ public class SchedulerService {
         return requestRepository
                 .findByModeAndStatusAndQueueAreaOrderByCreatedAtAsc(mode, ChargingRequestStatus.WAITING, area)
                 .stream()
-                .min(Comparator
-                        .comparing(ChargingRequest::getQueueNumber, Comparator.nullsLast(Comparator.naturalOrder()))
-                        .thenComparing(ChargingRequest::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder())));
+                .min(queueOrderComparator());
     }
 
     private Optional<ChargingPile> bestCandidatePile(ChargeMode mode, ChargingRequest request) {
@@ -327,9 +325,7 @@ public class SchedulerService {
 
     private Optional<ChargingRequest> firstPileQueueRequest(Long pileId) {
         return pileQueueRequests(pileId).stream()
-                .min(Comparator
-                        .comparing(ChargingRequest::getQueueNumber, Comparator.nullsLast(Comparator.naturalOrder()))
-                        .thenComparing(ChargingRequest::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder())));
+                .min(queueOrderComparator());
     }
 
     private List<ChargingRequest> pileQueueRequests(Long pileId) {
@@ -357,9 +353,7 @@ public class SchedulerService {
     private void renumberPileQueue(Long pileId) {
         List<ChargingRequest> queue = pileQueueRequests(pileId).stream()
                 .filter(request -> request.getStatus() == ChargingRequestStatus.WAITING)
-                .sorted(Comparator
-                        .comparing(ChargingRequest::getQueueNumber, Comparator.nullsLast(Comparator.naturalOrder()))
-                        .thenComparing(ChargingRequest::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder())))
+                .sorted(queueOrderComparator())
                 .toList();
         int number = 1;
         for (ChargingRequest request : queue) {
@@ -400,7 +394,15 @@ public class SchedulerService {
                 .comparing((ChargingRequest request) -> queueAreaRank(request.getQueueArea()))
                 .thenComparing(ChargingRequest::getAssignedPileId, Comparator.nullsLast(Comparator.naturalOrder()))
                 .thenComparing(ChargingRequest::getQueueNumber, Comparator.nullsLast(Comparator.naturalOrder()))
-                .thenComparing(ChargingRequest::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder()));
+                .thenComparing(ChargingRequest::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder()))
+                .thenComparing(ChargingRequest::getId, Comparator.nullsLast(Comparator.naturalOrder()));
+    }
+
+    private Comparator<ChargingRequest> queueOrderComparator() {
+        return Comparator
+                .comparing(ChargingRequest::getQueueNumber, Comparator.nullsLast(Comparator.naturalOrder()))
+                .thenComparing(ChargingRequest::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder()))
+                .thenComparing(ChargingRequest::getId, Comparator.nullsLast(Comparator.naturalOrder()));
     }
 
     private QueueItemDTO toQueueItem(ChargingRequest request, Vehicle vehicle, ChargingPile referencePile) {
