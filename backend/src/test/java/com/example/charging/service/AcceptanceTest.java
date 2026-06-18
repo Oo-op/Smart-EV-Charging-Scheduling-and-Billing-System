@@ -15,6 +15,8 @@ import java.io.FileWriter;
 import java.io.PrintWriter;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -165,6 +167,63 @@ class AcceptanceTest {
         assertEquals(0, failed, "Acceptance test failed with " + failed + " mismatches");
     }
 
+    @Test
+    void exportCurrentSchedulingOutput() throws Exception {
+        clearDatabase();
+        initCoreTestData();
+
+        Path csvPath = Paths.get("..", "tests", "resources", "作业验收用例_测试用例.csv")
+                .toAbsolutePath()
+                .normalize();
+        Path outputPath = Paths.get("..", "current_schedule_output.csv")
+                .toAbsolutePath()
+                .normalize();
+
+        List<Checkpoint> checkpoints = parseCSV(csvPath.toString());
+        currentSimTime = parseSimTime(checkpoints.get(0).time);
+
+        try (PrintWriter writer = new PrintWriter(Files.newBufferedWriter(outputPath, StandardCharsets.UTF_8))) {
+            writeCsvRow(writer, "时刻", "事件", "快充1", "快充2", "慢充1", "慢充2", "慢充3", "等候区");
+            for (Checkpoint cp : checkpoints) {
+                LocalDateTime targetTime = parseSimTime(cp.time);
+                advanceTime(targetTime);
+                executeEvent(cp.event);
+                startAssignedSessionsFromDatabase();
+                syncMirrorFromDatabase();
+
+                writeCsvRow(writer,
+                        cp.time,
+                        cp.event,
+                        getActualActiveString("FAST-1"),
+                        getActualActiveString("FAST-2"),
+                        getActualActiveString("SLOW-1"),
+                        getActualActiveString("SLOW-2"),
+                        getActualActiveString("SLOW-3"),
+                        getActualWaitingString());
+                writeCsvRow(writer,
+                        "",
+                        "",
+                        getActualQueueString("FAST-1", 0),
+                        getActualQueueString("FAST-2", 0),
+                        getActualQueueString("SLOW-1", 0),
+                        getActualQueueString("SLOW-2", 0),
+                        getActualQueueString("SLOW-3", 0),
+                        "");
+                writeCsvRow(writer,
+                        "",
+                        "",
+                        getActualQueueString("FAST-1", 1),
+                        getActualQueueString("FAST-2", 1),
+                        getActualQueueString("SLOW-1", 1),
+                        getActualQueueString("SLOW-2", 1),
+                        getActualQueueString("SLOW-3", 1),
+                        "");
+            }
+        }
+
+        System.out.println("Current scheduling output written to: " + outputPath);
+    }
+
     private void clearDatabase() {
         sessionRepository.deleteAll();
         requestRepository.deleteAll();
@@ -305,6 +364,26 @@ class AcceptanceTest {
         }
         list.add(sb.toString());
         return list.toArray(new String[0]);
+    }
+
+    private void writeCsvRow(PrintWriter writer, String... cells) {
+        writer.println(Arrays.stream(cells)
+                .map(this::csvCell)
+                .collect(java.util.stream.Collectors.joining(",")));
+    }
+
+    private String csvCell(String value) {
+        if (value == null || value.isEmpty()) {
+            return "";
+        }
+        if ("-".equals(value)) {
+            return value;
+        }
+        String escaped = value.replace("\"", "\"\"");
+        if (escaped.contains(",") || escaped.contains("\"") || escaped.contains("\n")) {
+            return "\"" + escaped + "\"";
+        }
+        return escaped;
     }
 
     private void advanceTime(LocalDateTime targetTime) {
