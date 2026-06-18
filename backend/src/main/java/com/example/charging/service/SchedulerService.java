@@ -43,6 +43,7 @@ public class SchedulerService {
     private final VehicleRepository vehicleRepository;
     private final ChargingSessionRepository sessionRepository;
     private final ChargingProperties chargingProperties;
+    private final ThreadLocal<Boolean> migrating = ThreadLocal.withInitial(() -> false);
 
     public SchedulerService(ChargingRequestRepository requestRepository,
                             ChargingPileRepository pileRepository,
@@ -82,11 +83,19 @@ public class SchedulerService {
 
     @Transactional
     public List<DispatchResult> triggerDispatch(ChargeMode mode) {
+        return triggerDispatch(mode, true);
+    }
+
+    private List<DispatchResult> triggerDispatch(ChargeMode mode, boolean blockOnPriorityPileQueue) {
         if (mode == null) {
             throw new IllegalArgumentException("Charging mode cannot be null");
         }
 
-        List<DispatchResult> assigned = new ArrayList<>();
+        List<DispatchResult> assigned = new ArrayList<>(checkAndMigratePendingFaults(mode));
+        if (hasPendingPriorityRequests(mode, blockOnPriorityPileQueue)) {
+            reserveIdlePileHeads(mode, assigned);
+            return assigned;
+        }
         while (true) {
             ChargingRequest next = nextWaitingRequest(mode).orElse(null);
             if (next == null) {
@@ -115,13 +124,86 @@ public class SchedulerService {
 
     @Transactional
     public DispatchResult promoteNextForPile(Long pileId) {
+        return promoteNextForPile(pileId, false);
+    }
+
+    @Transactional
+    public DispatchResult promoteNextForRecoveredPile(Long pileId) {
+        return promoteNextForPile(pileId, true);
+    }
+
+    private DispatchResult promoteNextForPile(Long pileId, boolean applyInitialChargeCredit) {
         ChargingPile pile = pileRepository.findById(pileId)
                 .orElseThrow(() -> new IllegalArgumentException("Charging pile not found"));
-        List<DispatchResult> results = triggerDispatch(pile.getMode());
-        return results.stream()
+        List<DispatchResult> assigned = new ArrayList<>();
+        if (pile.getStatus() == ChargingPileStatus.IDLE) {
+            firstPileQueueRequest(pileId).ifPresent(request -> {
+                request.setStatus(ChargingRequestStatus.ASSIGNED);
+                request.setQueueNumber(null);
+                if (applyInitialChargeCredit
+                        && Boolean.TRUE.equals(request.getPriorityDispatch())
+                        && safe(request.getChargedAmount()).compareTo(BigDecimal.ZERO) == 0) {
+                    request.setInitialChargeCredit(true);
+                }
+                pile.setStatus(ChargingPileStatus.RESERVED);
+                requestRepository.save(request);
+                pileRepository.save(pile);
+                assigned.add(toDispatchResult(request, pile));
+                renumberPileQueue(pileId);
+            });
+        }
+        if (assigned.isEmpty()) {
+            assigned.addAll(triggerPriorityDispatch(pile.getMode()));
+        }
+        return assigned.stream()
                 .filter(result -> result.getPileId().equals(pileId))
                 .findFirst()
                 .orElse(null);
+    }
+
+    @Transactional
+    public DispatchResult promoteNextForCompletedSession(Long pileId) {
+        ChargingPile pile = pileRepository.findById(pileId)
+                .orElseThrow(() -> new IllegalArgumentException("Charging pile not found"));
+        List<DispatchResult> assigned = new ArrayList<>();
+        if (pile.getStatus() == ChargingPileStatus.IDLE) {
+            firstPileQueueRequest(pileId).ifPresent(request -> {
+                request.setStatus(ChargingRequestStatus.ASSIGNED);
+                request.setQueueNumber(null);
+                pile.setStatus(ChargingPileStatus.RESERVED);
+                requestRepository.save(request);
+                pileRepository.save(pile);
+                assigned.add(toDispatchResult(request, pile));
+                renumberPileQueue(pileId);
+            });
+        }
+        if (assigned.isEmpty()) {
+            assigned.addAll(triggerPriorityDispatch(pile.getMode()));
+        }
+        if (!hasFaultPiles() && !hasPendingPriorityRequests(pile.getMode(), false)) {
+            assigned.addAll(triggerDispatch(pile.getMode(), false));
+        }
+        return assigned.stream()
+                .filter(result -> result.getPileId().equals(pileId))
+                .findFirst()
+                .orElse(null);
+    }
+
+    @Transactional
+    public void resumeWaitingAreaAfterAllFaultsRecovered() {
+        if (hasFaultPiles()) {
+            return;
+        }
+
+        pileRepository.findAll().stream()
+                .map(ChargingPile::getMode)
+                .distinct()
+                .forEach(mode -> triggerDispatch(mode, false));
+    }
+
+    private boolean hasFaultPiles() {
+        return pileRepository.findAll().stream()
+                .anyMatch(pile -> pile.getStatus() == ChargingPileStatus.FAULT);
     }
 
     @Transactional
@@ -139,31 +221,83 @@ public class SchedulerService {
     }
 
     @Transactional
-    public void migrateFaultedPileQueue(Long faultedPileId) {
-        ChargingPile pile = pileRepository.findById(faultedPileId)
+    public List<DispatchResult> migrateFaultedPileQueue(Long faultedPileId) {
+        ChargingPile faultedPile = pileRepository.findById(faultedPileId)
                 .orElseThrow(() -> new IllegalArgumentException("Charging pile not found"));
         List<ChargingRequest> queued = pileQueueRequests(faultedPileId);
-        int order = 1;
+        List<DispatchResult> results = new ArrayList<>();
         for (ChargingRequest request : queued) {
-            request.setStatus(ChargingRequestStatus.WAITING);
-            request.setAssignedPileId(null);
-            request.setQueueArea(QueueArea.MIGRATION_QUEUE);
-            request.setQueueNumber(order++);
+            request.setPriorityDispatch(true);
             requestRepository.save(request);
+            ChargingPile targetPile = bestAvailablePile(request.getMode(), request).orElse(null);
+            if (targetPile != null) {
+                if (moveToPileQueue(request, targetPile)) {
+                    if (request.getStatus() == ChargingRequestStatus.ASSIGNED) {
+                        results.add(toDispatchResult(request, targetPile));
+                    }
+                }
+            }
         }
-        triggerPriorityDispatch(pile.getMode());
+        renumberPileQueue(faultedPileId);
+        return results;
     }
 
     @Transactional
-    public void placeRecoveryRequest(Long requestId) {
+    public List<DispatchResult> placeRecoveryRequest(Long requestId) {
         ChargingRequest request = requestRepository.findById(requestId)
                 .orElseThrow(() -> new IllegalArgumentException("Charging request not found"));
         request.setStatus(ChargingRequestStatus.WAITING);
         request.setAssignedPileId(null);
         request.setQueueArea(QueueArea.RECOVERY_QUEUE);
         request.setQueueNumber(0);
+        request.setPriorityDispatch(true);
         requestRepository.save(request);
-        triggerPriorityDispatch(request.getMode());
+        return triggerPriorityDispatch(request.getMode());
+    }
+
+    @Transactional
+    public void restoreRecoveredPilePriorityOrder(Long recoveredPileId) {
+        ChargingPile recoveredPile = pileRepository.findById(recoveredPileId)
+                .orElseThrow(() -> new IllegalArgumentException("Charging pile not found"));
+        List<ChargingRequest> zeroChargedPriorityRequests = requestRepository.findAll().stream()
+                .filter(request -> request.getMode() == recoveredPile.getMode())
+                .filter(request -> Boolean.TRUE.equals(request.getPriorityDispatch()))
+                .filter(request -> request.getStatus() == ChargingRequestStatus.WAITING)
+                .filter(request -> request.getQueueArea() == QueueArea.PILE_QUEUE)
+                .filter(request -> safe(request.getChargedAmount()).compareTo(BigDecimal.ZERO) == 0)
+                .sorted(Comparator
+                        .comparing(ChargingRequest::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder()))
+                        .thenComparing(ChargingRequest::getId, Comparator.nullsLast(Comparator.naturalOrder())))
+                .toList();
+
+        for (ChargingRequest request : zeroChargedPriorityRequests) {
+            if (waitingQueueSize(recoveredPileId) >= pileQueueCapacity()
+                    && !recoveredPileId.equals(request.getAssignedPileId())) {
+                break;
+            }
+            Long oldPileId = request.getAssignedPileId();
+            request.setAssignedPileId(recoveredPileId);
+            requestRepository.save(request);
+            if (oldPileId != null && !oldPileId.equals(recoveredPileId)) {
+                renumberPileQueue(oldPileId);
+            }
+        }
+        renumberPriorityQueueByCreatedAt(recoveredPileId);
+    }
+
+    private void renumberPriorityQueueByCreatedAt(Long pileId) {
+        List<ChargingRequest> queue = pileQueueRequests(pileId).stream()
+                .filter(request -> Boolean.TRUE.equals(request.getPriorityDispatch()))
+                .filter(request -> safe(request.getChargedAmount()).compareTo(BigDecimal.ZERO) == 0)
+                .sorted(Comparator
+                        .comparing(ChargingRequest::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder()))
+                        .thenComparing(ChargingRequest::getId, Comparator.nullsLast(Comparator.naturalOrder())))
+                .toList();
+        int number = 1;
+        for (ChargingRequest request : queue) {
+            request.setQueueNumber(number++);
+            requestRepository.save(request);
+        }
     }
 
     public QueueStatusDTO getQueue(ChargeMode mode) {
@@ -219,20 +353,62 @@ public class SchedulerService {
         return firstQueueRequest(mode, QueueArea.WAITING_AREA);
     }
 
-    private void triggerPriorityDispatch(ChargeMode mode) {
+    private List<DispatchResult> checkAndMigratePendingFaults(ChargeMode mode) {
+        List<DispatchResult> results = new ArrayList<>();
+        if (migrating.get()) {
+            return results;
+        }
+        try {
+            migrating.set(true);
+            
+            // 1. Find and migrate interrupted requests (recovery requests)
+            List<ChargingRequest> pendingRecoveries = requestRepository.findAll().stream()
+                    .filter(r -> r.getMode() == mode)
+                    .filter(r -> r.getStatus() == ChargingRequestStatus.WAITING)
+                    .filter(r -> r.getQueueNumber() != null && r.getQueueNumber() == 0)
+                    .filter(r -> r.getQueueArea() != QueueArea.RECOVERY_QUEUE)
+                    .toList();
+
+            for (ChargingRequest req : pendingRecoveries) {
+                results.addAll(placeRecoveryRequest(req.getId()));
+            }
+
+            // 2. Find and migrate queues of FAULT piles of this mode
+            List<ChargingPile> faultPiles = pileRepository.findAll().stream()
+                    .filter(p -> p.getMode() == mode)
+                    .filter(p -> p.getStatus() == ChargingPileStatus.FAULT)
+                    .toList();
+
+            for (ChargingPile pile : faultPiles) {
+                List<ChargingRequest> queued = pileQueueRequests(pile.getId());
+                if (!queued.isEmpty()) {
+                    results.addAll(migrateFaultedPileQueue(pile.getId()));
+                }
+            }
+        } finally {
+            migrating.set(false);
+        }
+        return results;
+    }
+
+    List<DispatchResult> triggerPriorityDispatch(ChargeMode mode) {
+        List<DispatchResult> assigned = checkAndMigratePendingFaults(mode);
         while (true) {
             ChargingRequest next = nextPriorityRequest(mode).orElse(null);
             if (next == null) {
-                return;
+                return assigned;
             }
 
             ChargingPile targetPile = bestCandidatePile(mode, next).orElse(null);
             if (targetPile == null) {
-                return;
+                return assigned;
             }
 
             if (!moveToPileQueue(next, targetPile)) {
-                return;
+                return assigned;
+            }
+            if (next.getStatus() == ChargingRequestStatus.ASSIGNED) {
+                assigned.add(toDispatchResult(next, targetPile));
             }
         }
     }
@@ -250,6 +426,15 @@ public class SchedulerService {
                 .findByModeAndStatusAndQueueAreaOrderByCreatedAtAsc(mode, ChargingRequestStatus.WAITING, area)
                 .stream()
                 .min(queueOrderComparator());
+    }
+
+    private boolean hasPendingPriorityRequests(ChargeMode mode, boolean includePileQueue) {
+        return requestRepository.findAll().stream()
+                .filter(request -> request.getMode() == mode)
+                .filter(request -> Boolean.TRUE.equals(request.getPriorityDispatch()))
+                .filter(request -> includePileQueue || request.getQueueArea() != QueueArea.PILE_QUEUE)
+                .anyMatch(request -> request.getStatus() == ChargingRequestStatus.WAITING
+                        || request.getStatus() == ChargingRequestStatus.ASSIGNED);
     }
 
     private Optional<ChargingPile> bestCandidatePile(ChargeMode mode, ChargingRequest request) {

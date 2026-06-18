@@ -60,6 +60,12 @@ public class ChargingRequest {
     @Column(name = "assigned_pile_id")
     private Long assignedPileId;
 
+    @Column(name = "priority_dispatch", nullable = false)
+    private Boolean priorityDispatch = false;
+
+    @Column(name = "initial_charge_credit", nullable = false)
+    private Boolean initialChargeCredit = false;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
